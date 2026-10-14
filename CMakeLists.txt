@@ -18,6 +18,7 @@ include(cmake/dependencies.cmake)
 # ---------------------------------------------------------------------------
 add_library(daisy_core
     src/core/pipeline.cpp
+    src/core/provider.cpp
     src/model/config.cpp
     src/model/time.cpp
     src/model/ir_document.cpp
