@@ -25,8 +25,9 @@ std::string now_iso8601() {
     return buf;
 }
 
+// 从 json 中读取可选字段：null 或缺失时保持 out 原值。
 template <typename T>
-void set_opt(const nlohmann::json& j, const char* key, T& out) {
+void set_opt(const nlohmann::json& j, const char* key, std::optional<T>& out) {
     if (j.contains(key) && !j[key].is_null()) {
         out = j[key].get<T>();
     }

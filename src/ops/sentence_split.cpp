@@ -1,6 +1,8 @@
 #include "daisy/ops/sentence_split.hpp"
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 #include "daisy/infra/log.hpp"
 
@@ -9,8 +11,18 @@ namespace daisy::ops {
 // 简易 rule 策略：按标点切分长句（对应 C# SentenceSplitStrategy.Rule）。
 namespace {
 
-bool is_boundary(char c) {
-    return c == '。' || c == '！' || c == '？' || c == '.' || c == '!' || c == '?';
+// 常见句末标点（含 UTF-8 中文标点）。
+const std::vector<std::string> kBoundaryMarks = {"。", "！", "？", ".", "!", "?"};
+
+// 判断 cur 的最后一个字符是否为句末标点（支持多字节 UTF-8）。
+bool ends_with_boundary(const std::string& cur) {
+    for (const auto& m : kBoundaryMarks) {
+        if (cur.size() >= m.size() &&
+            cur.compare(cur.size() - m.size(), m.size(), m) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // 在 text 的标点边界处切分；超长句按 max_length 硬切。
@@ -19,7 +31,7 @@ std::vector<std::string> split_text(const std::string& text, std::size_t max_len
     std::string cur;
     for (const char c : text) {
         cur.push_back(c);
-        if (is_boundary(c) || cur.size() >= max_length) {
+        if (ends_with_boundary(cur) || cur.size() >= max_length) {
             parts.push_back(cur);
             cur.clear();
         }
