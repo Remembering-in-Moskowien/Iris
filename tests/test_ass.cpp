@@ -6,7 +6,7 @@ using daisy::model::SubtitleDocument;
 using daisy::model::SubtitleLine;
 using daisy::model::TimeCode;
 
-TEST_CASE("ASS 渲染包含脚本头与对话行") {
+TEST_CASE("ASS render includes script header and dialogue line") {
     SubtitleDocument doc;
     doc.title = "test";
     SubtitleLine line;
@@ -24,7 +24,7 @@ TEST_CASE("ASS 渲染包含脚本头与对话行") {
             std::string::npos);
 }
 
-TEST_CASE("ASS 文本中的花括号被转义") {
+TEST_CASE("ASS braces in text are escaped") {
     SubtitleDocument doc;
     SubtitleLine line;
     line.start = TimeCode(0);
@@ -36,7 +36,7 @@ TEST_CASE("ASS 文本中的花括号被转义") {
     REQUIRE(ass.find("a\\{b\\}c") != std::string::npos);
 }
 
-TEST_CASE("样式行包含字体与字号") {
+TEST_CASE("Style line contains font and size") {
     daisy::model::AssStyle style;
     style.name = "Sub";
     style.font_name = "Noto Sans";
@@ -46,7 +46,7 @@ TEST_CASE("样式行包含字体与字号") {
     REQUIRE(s.find("&H00FFFFFF") != std::string::npos);
 }
 
-TEST_CASE("SRT 渲染带序号和时间轴") {
+TEST_CASE("SRT render includes index and timeline") {
     SubtitleDocument doc;
     SubtitleLine line;
     line.start = TimeCode(0);

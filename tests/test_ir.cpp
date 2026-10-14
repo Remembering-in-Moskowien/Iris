@@ -7,7 +7,7 @@ using daisy::model::Sentence;
 using daisy::model::Track;
 using daisy::model::validate_document;
 
-TEST_CASE("IR 文档 JSON 序列化往返") {
+TEST_CASE("IR document JSON round-trip") {
     IrDocument doc;
     doc.generator.tool = "daisy";
     doc.generator.version = "0.1.0";
@@ -40,7 +40,7 @@ TEST_CASE("IR 文档 JSON 序列化往返") {
     REQUIRE(back.state.tracks[0].sentences[0].end_ms == 2500);
 }
 
-TEST_CASE("IR 文档校验") {
+TEST_CASE("IR document validation") {
     IrDocument doc;
     doc.schema_version = "1.0";
     doc.generator.tool = "daisy";
@@ -57,7 +57,7 @@ TEST_CASE("IR 文档校验") {
     REQUIRE(fail.issues.size() >= 1);
 }
 
-TEST_CASE("IR 序列化保留溯源记录") {
+TEST_CASE("IR serialization keeps provenance") {
     IrDocument doc;
     doc.generator.tool = "daisy";
     doc.config.input_file_path = "in.mp4";
