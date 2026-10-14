@@ -1,0 +1,31 @@
+# Build outputs
+/build/
+/cmake-build-*/
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exe
+*.out
+
+# IDE / editor
+/.vs/
+/.vscode/
+/.idea/
+*.user
+CMakeUserPresets.json
+
+# Local runtime artifacts (never commit)
+/.cache/
+/.local/
+/artifacts/
+*.log
+daisy.config.json
+/tools/
+/models/
+/tools/_shots/
+/tools/_backup/
+
+# Test media and generated outputs
+/test-media/
+/tests/_output/
