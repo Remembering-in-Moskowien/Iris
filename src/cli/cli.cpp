@@ -88,7 +88,8 @@ int cmd_asr(const std::string& input, const std::string& language,
         return 1;
     }
 
-    const fs::path out_path = output.empty() ? (input + ".daisy.json") : fs::path(output);
+    const fs::path out_path =
+        output.empty() ? fs::path(input + ".daisy.json") : fs::path(output);
     doc.save(out_path.string());
     spdlog::info("asr: 已保存 IR -> {}", out_path.string());
     return 0;
