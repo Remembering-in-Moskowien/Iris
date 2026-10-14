@@ -5,10 +5,10 @@
 
 namespace daisy::model {
 
-// ASS 色彩 &HAABBGGRR（忽略高位 alpha，按低 24 位输出）。
+// ASS 色彩 &HAABBGGRR（8 位：alpha + BGR，符合 v4.00+ 规范）。
 static std::string ass_colour(std::uint32_t argb) {
     char buf[16];
-    std::snprintf(buf, sizeof(buf), "&H%06X", argb & 0x00FFFFFF);
+    std::snprintf(buf, sizeof(buf), "&H%08X", static_cast<unsigned int>(argb));
     return buf;
 }
 
