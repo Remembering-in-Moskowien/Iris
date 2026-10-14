@@ -14,6 +14,7 @@
 #include "daisy/infra/process.hpp"
 #include "daisy/model/config.hpp"
 #include "daisy/model/ir_document.hpp"
+#include "daisy/model/subtitle.hpp"
 #include "daisy/ops/audio_preprocess.hpp"
 #include "daisy/ops/ass_build.hpp"
 #include "daisy/ops/ffmpeg_convert.hpp"

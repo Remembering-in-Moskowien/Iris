@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include "daisy/infra/log.hpp"
+#include "daisy/model/subtitle.hpp"
 
 namespace daisy::ops {
 

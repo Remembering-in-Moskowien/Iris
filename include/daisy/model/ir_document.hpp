@@ -23,6 +23,10 @@ struct GeneratorInfo {
     std::string generated_at; ///< ISO 8601
     std::optional<std::string> input_file;
     std::optional<std::string> output_file;
+
+    /// 序列化为 nlohmann::json。
+    [[nodiscard]] nlohmann::json to_json() const;
+    static GeneratorInfo from_json(const nlohmann::json& j);
 };
 
 /// 单条溯源记录（对应 C# ProvenanceEntry）。
@@ -31,6 +35,10 @@ struct ProvenanceEntry {
     std::optional<std::string> model;
     std::optional<std::string> parameters_hash; ///< 配置指纹 SHA-256 hex
     std::optional<std::string> applied_at;      ///< ISO 8601
+
+    /// 序列化为 nlohmann::json。
+    [[nodiscard]] nlohmann::json to_json() const;
+    static ProvenanceEntry from_json(const nlohmann::json& j);
 };
 
 /// 词级数据（对应 C# Word）。
@@ -40,6 +48,10 @@ struct Word {
     double end = 0.0;
     double score = 1.0;
     std::optional<std::string> speaker;
+
+    /// 序列化为 nlohmann::json。
+    [[nodiscard]] nlohmann::json to_json() const;
+    static Word from_json(const nlohmann::json& j);
 };
 
 /// 句子（对应 C# Sentence）。
@@ -50,6 +62,10 @@ struct Sentence {
     std::optional<std::string> translated_text;
     std::optional<std::string> speaker;
     std::vector<Word> words;
+
+    /// 序列化为 nlohmann::json。
+    [[nodiscard]] nlohmann::json to_json() const;
+    static Sentence from_json(const nlohmann::json& j);
 };
 
 /// 轨道：同一语言/类型下的句子集合（对应 C# IRTrack）。
@@ -57,6 +73,10 @@ struct Track {
     std::string type; ///< "transcribe" | "translation" | "script" | ...
     std::string language;
     std::vector<Sentence> sentences;
+
+    /// 序列化为 nlohmann::json。
+    [[nodiscard]] nlohmann::json to_json() const;
+    static Track from_json(const nlohmann::json& j);
 };
 
 /// 工作流配置（对应 C# WorkflowConfig 常用字段）。
@@ -73,6 +93,10 @@ struct WorkflowConfig {
     int max_sentence_length = 80;
     int max_chars_per_line = 18;
     double max_cps = 5.0;
+
+    /// 序列化为 nlohmann::json。
+    [[nodiscard]] nlohmann::json to_json() const;
+    static WorkflowConfig from_json(const nlohmann::json& j);
 };
 
 /// 工作流状态（对应 C# WorkflowState 常用字段；运行期产物不持久化）。
@@ -86,6 +110,10 @@ struct WorkflowState {
     bool is_audio_converted = false;
     bool is_vocals_separated = false;
     bool is_transcribed = false;
+
+    /// 序列化为 nlohmann::json。
+    [[nodiscard]] nlohmann::json to_json() const;
+    static WorkflowState from_json(const nlohmann::json& j);
 };
 
 /// IR 文档根对象（对应 C# CenturionDocument）。
