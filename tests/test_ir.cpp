@@ -1,15 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "daisy/model/ir_document.hpp"
+#include "iris/model/ir_document.hpp"
 
-using daisy::model::IrDocument;
-using daisy::model::Sentence;
-using daisy::model::Track;
-using daisy::model::validate_document;
+using iris::model::IrDocument;
+using iris::model::Sentence;
+using iris::model::Track;
+using iris::model::validate_document;
 
 TEST_CASE("IR document JSON round-trip") {
     IrDocument doc;
-    doc.generator.tool = "daisy";
+    doc.generator.tool = "iris";
     doc.generator.version = "0.1.0";
     doc.generator.command = "asr";
     doc.config.input_file_path = "in.mp4";
@@ -30,7 +30,7 @@ TEST_CASE("IR document JSON round-trip") {
     const auto back = IrDocument::from_json(json);
 
     REQUIRE(back.schema_version == doc.schema_version);
-    REQUIRE(back.generator.tool == "daisy");
+    REQUIRE(back.generator.tool == "iris");
     REQUIRE(back.generator.command == "asr");
     REQUIRE(back.config.language == "zh");
     REQUIRE(back.config.transcriber_engine == "whisper");
@@ -43,7 +43,7 @@ TEST_CASE("IR document JSON round-trip") {
 TEST_CASE("IR document validation") {
     IrDocument doc;
     doc.schema_version = "1.0";
-    doc.generator.tool = "daisy";
+    doc.generator.tool = "iris";
     doc.config.input_file_path = "in.mp4";
 
     const auto ok = validate_document(doc);
@@ -51,7 +51,7 @@ TEST_CASE("IR document validation") {
 
     IrDocument bad;
     bad.schema_version = "9.9";
-    bad.generator.tool = "daisy";
+    bad.generator.tool = "iris";
     const auto fail = validate_document(bad);
     REQUIRE_FALSE(fail.is_valid);
     REQUIRE(fail.issues.size() >= 1);
@@ -59,9 +59,9 @@ TEST_CASE("IR document validation") {
 
 TEST_CASE("IR serialization keeps provenance") {
     IrDocument doc;
-    doc.generator.tool = "daisy";
+    doc.generator.tool = "iris";
     doc.config.input_file_path = "in.mp4";
-    daisy::model::ProvenanceEntry p;
+    iris::model::ProvenanceEntry p;
     p.op = "transcribe";
     p.model = "whisper.cpp";
     doc.provenance.push_back(p);

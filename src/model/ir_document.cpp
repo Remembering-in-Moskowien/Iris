@@ -1,14 +1,14 @@
-#include "daisy/model/ir_document.hpp"
+#include "iris/model/ir_document.hpp"
 
 #include <ctime>
 #include <fstream>
 #include <stdexcept>
 
-namespace daisy::model {
+namespace iris::model {
 
 namespace {
 
-constexpr const char* kToolName = "daisy";
+constexpr const char* kToolName = "iris";
 constexpr const char* kCurrentVersion = "1.0";
 
 std::string now_iso8601() {
@@ -267,4 +267,4 @@ ValidationResult validate_file(const std::string& path) {
     }
 }
 
-} // namespace daisy::model
+} // namespace iris::model

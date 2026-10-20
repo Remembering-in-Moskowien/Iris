@@ -1,8 +1,8 @@
-#include "daisy/ops/transcribe.hpp"
+#include "iris/ops/transcribe.hpp"
 
-#include "daisy/infra/log.hpp"
+#include "iris/infra/log.hpp"
 
-namespace daisy::ops {
+namespace iris::ops {
 
 bool Transcribe::execute(core::PipelineContext& ctx) {
     if (!ctx.doc || !provider_) return false;
@@ -35,4 +35,4 @@ bool Transcribe::execute(core::PipelineContext& ctx) {
     return true;
 }
 
-} // namespace daisy::ops
+} // namespace iris::ops

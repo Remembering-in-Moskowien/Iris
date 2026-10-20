@@ -1,9 +1,9 @@
-#include "daisy/ops/ffmpeg_convert.hpp"
+#include "iris/ops/ffmpeg_convert.hpp"
 
-#include "daisy/infra/log.hpp"
-#include "daisy/infra/process.hpp"
+#include "iris/infra/log.hpp"
+#include "iris/infra/process.hpp"
 
-namespace daisy::ops {
+namespace iris::ops {
 
 bool FfmpegConvert::execute(core::PipelineContext& ctx) {
     if (!ctx.doc) return false;
@@ -37,4 +37,4 @@ bool FfmpegConvert::execute(core::PipelineContext& ctx) {
     return true;
 }
 
-} // namespace daisy::ops
+} // namespace iris::ops

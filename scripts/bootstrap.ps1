@@ -1,4 +1,4 @@
-# Windows 一键构建脚本：daisy (C++ migration of Centurion)
+# Windows 一键构建脚本：iris (C++ migration of Centurion)
 # 用法：powershell -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 [-ConfigureOnly] [-SkipTests]
 param(
     [switch]$ConfigureOnly,
@@ -9,7 +9,7 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-Write-Host "=== daisy bootstrap ==="
+Write-Host "=== iris bootstrap ==="
 
 # 1. 检查工具链
 $cmake = Get-Command cmake -ErrorAction SilentlyContinue
@@ -20,8 +20,8 @@ if (-not $cmake) {
 Write-Host "cmake: $((cmake --version | Select-Object -First 1))"
 
 # 2. 配置
-Write-Host "`n[1/3] 配置 (cmake -S . -B build)"
-& cmake -S . -B build -DDAISY_BUILD_TESTS=ON
+Write-Host "`n[1/3] 配置 (cmake -S . -B build -DIRIS_BUILD_TESTS=ON)"
+& cmake -S . -B build -DIRIS_BUILD_TESTS=ON
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($ConfigureOnly) {
@@ -41,4 +41,4 @@ if (-not $SkipTests) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-Write-Host "`n完成。可执行文件: $root\build\bin\daisy.exe" -ForegroundColor Green
+Write-Host "`n完成。可执行文件: $root\build\bin\iris.exe" -ForegroundColor Green

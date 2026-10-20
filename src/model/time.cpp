@@ -1,10 +1,10 @@
-#include "daisy/model/time.hpp"
+#include "iris/model/time.hpp"
 
 #include <cmath>
 #include <cstdio>
 #include <string>
 
-namespace daisy::model {
+namespace iris::model {
 
 std::optional<TimeCode> TimeCode::parse_ass(std::string_view s) {
     // 格式 H:MM:SS.CC（百分秒）
@@ -65,4 +65,4 @@ std::string TimeCode::to_srt() const {
     return buf;
 }
 
-} // namespace daisy::model
+} // namespace iris::model

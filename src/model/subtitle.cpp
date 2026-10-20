@@ -1,9 +1,9 @@
-#include "daisy/model/subtitle.hpp"
+#include "iris/model/subtitle.hpp"
 
 #include <cstdio>
 #include <sstream>
 
-namespace daisy::model {
+namespace iris::model {
 
 // ASS 色彩 &HAABBGGRR（8 位：alpha + BGR，符合 v4.00+ 规范）。
 static std::string ass_colour(std::uint32_t argb) {
@@ -76,4 +76,4 @@ std::string SubtitleDocument::render_srt() const {
     return os.str();
 }
 
-} // namespace daisy::model
+} // namespace iris::model

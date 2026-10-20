@@ -1,8 +1,8 @@
-#include "daisy/core/provider.hpp"
+#include "iris/core/provider.hpp"
 
 #include <algorithm>
 
-namespace daisy::core {
+namespace iris::core {
 
 void ProviderRegistry::register_provider(ProviderInfo info) {
     // 同名同域覆盖；否则追加。
@@ -29,4 +29,4 @@ std::optional<ProviderInfo> ProviderRegistry::find(const std::string& domain,
 
 std::vector<ProviderInfo> ProviderRegistry::all() const { return providers_; }
 
-} // namespace daisy::core
+} // namespace iris::core

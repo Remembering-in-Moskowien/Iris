@@ -1,35 +1,35 @@
-# 迁移指南：Centurion (C#/.NET 10) → daisy (C++20)
+# 迁移指南：Centurion (C#/.NET 10) → iris (C++20)
 
-本文档是从 Centurion 迁移到 daisy 的权威映射与进度记录。
+本文档是从 Centurion 迁移到 iris 的权威映射与进度记录。
 原仓库 `Remembering-in-Moskowien/Centurion` 保持 private，作为参考实现。
 
 ## 1. 项目结构映射
 
-| Centurion（C#） | daisy（C++） | 说明 |
+| Centurion（C#） | iris（C++） | 说明 |
 |---|---|---|
-| `src/Centurion.Models` | `include/daisy/model` + `src/model` | 数据模型、IR 契约、元数据 |
-| `src/Centurion.Abstractions` | `include/daisy/core` | Operator / Provider / 管线抽象 |
-| `src/Centurion.Core` | `include/daisy/core` + `src/core` + `include/daisy/ops` + `src/ops` | DAG 引擎、操作符、策略、提供者 |
-| `src/Centurion.Cli` | `include/daisy/cli` + `src/cli` | CLI11 前端（替代 Spectre.Console） |
+| `src/Centurion.Models` | `include/iris/model` + `src/model` | 数据模型、IR 契约、元数据 |
+| `src/Centurion.Abstractions` | `include/iris/core` | Operator / Provider / 管线抽象 |
+| `src/Centurion.Core` | `include/iris/core` + `src/core` + `include/iris/ops` + `src/ops` | DAG 引擎、操作符、策略、提供者 |
+| `src/Centurion.Cli` | `include/iris/cli` + `src/cli` | CLI11 前端（替代 Spectre.Console） |
 | `src/Centurion.Tests` | `tests/` | Catch2（替代 xUnit） |
-| `*.centurion.json`（IR v1.0） | `*.daisy.json`（IR v1.0，字段契约一致） | 中间文件 |
+| `*.centurion.json`（IR v1.0） | `*.iris.json`（IR v1.0，字段契约一致） | 中间文件 |
 
 ## 2. 核心类型映射
 
 | C# | C++ | 备注 |
 |---|---|---|
-| `CenturionDocument` | `daisy::model::IrDocument` | schemaVersion + generator + provenance + config + state |
-| `GeneratorInfo` | `daisy::model::GeneratorInfo` | tool/version/command/generatedAt/inputFile/outputFile |
-| `ProvenanceEntry` | `daisy::model::ProvenanceEntry` | operator/model/parametersHash/appliedAt |
-| `WorkflowConfig` | `daisy::model::WorkflowConfig` | 常用字段已映射（inputFilePath、language、transcriberEngine 等） |
-| `WorkflowState` | `daisy::model::WorkflowState` | 各阶段产物路径 + 轨道集合 |
-| `Sentence` / `Word` | `daisy::model::Sentence` / `Word` | startMs/endMs/text/words |
-| `IRTrack` | `daisy::model::Track` | type + language + sentences |
-| `SubtitleTime` 时间码 | `daisy::model::TimeCode` | ASS（百分秒）/ SRT（毫秒）解析与格式化 |
-| `Operator` | `daisy::core::Operator` | name() + dependencies() + execute(ctx) |
-| `Pipeline`（DAG 执行器） | `daisy::core::Pipeline` | 注册 → 拓扑排序 → 执行 |
-| `IAsrProvider` 等 | `daisy::core::IAsrProvider` | provider 抽象 |
-| `AppConfig`（centurion.config.json） | `daisy::model::AppConfig`（daisy.config.json） | downloadProxy 等 |
+| `CenturionDocument` | `iris::model::IrDocument` | schemaVersion + generator + provenance + config + state |
+| `GeneratorInfo` | `iris::model::GeneratorInfo` | tool/version/command/generatedAt/inputFile/outputFile |
+| `ProvenanceEntry` | `iris::model::ProvenanceEntry` | operator/model/parametersHash/appliedAt |
+| `WorkflowConfig` | `iris::model::WorkflowConfig` | 常用字段已映射（inputFilePath、language、transcriberEngine 等） |
+| `WorkflowState` | `iris::model::WorkflowState` | 各阶段产物路径 + 轨道集合 |
+| `Sentence` / `Word` | `iris::model::Sentence` / `Word` | startMs/endMs/text/words |
+| `IRTrack` | `iris::model::Track` | type + language + sentences |
+| `SubtitleTime` 时间码 | `iris::model::TimeCode` | ASS（百分秒）/ SRT（毫秒）解析与格式化 |
+| `Operator` | `iris::core::Operator` | name() + dependencies() + execute(ctx) |
+| `Pipeline`（DAG 执行器） | `iris::core::Pipeline` | 注册 → 拓扑排序 → 执行 |
+| `IAsrProvider` 等 | `iris::core::IAsrProvider` | provider 抽象 |
+| `AppConfig`（centurion.config.json） | `iris::model::AppConfig`（iris.config.json） | downloadProxy 等 |
 
 ## 3. 已迁移（当前提交）
 
@@ -38,9 +38,11 @@
 - **字幕渲染**：ASS v4.00+ 脚本（样式表 + 事件表）、SRT、TXT。
 - **DAG 引擎**：Operator 注册、依赖声明、Kahn 拓扑排序、顺序执行、溯源记录。
 - **主链路操作符**：`FfmpegConvert`（ffmpeg → 16kHz 单声道 WAV）、`AudioPreprocess`
-  （speechnorm + highpass）、`Transcribe`（whisper.cpp `-oj` 输出解析）、`SentenceSplit`
+  （speechnorm + highpass）、`Transcribe`（**进程内推理**：whisper(ggml) / qwen3-asr(ggml)
+  走 CrispASR，whisper(transformer) 走 CTranslate2）、`SentenceSplit`
   （rule 策略，标点边界 + 最大长度硬切，子句时间轴按比例分配）、`SubtitleBuild`。
-- **提供者**：`WhisperCppAsr`（子进程调用 whisper-cli，解析 segments JSON）。
+- **提供者**：`CrispAsr`（内嵌 CrispASR / CTranslate2，进程内推理；
+  不再调用 whisper-cli 等外部 ASR 可执行文件）。
 - **CLI**：`asr` / `build` / `validate` / `doctor` / `models list` / `init`(stub)。
 - **测试**：时间码、ASS/SRT 渲染、IR 序列化往返与校验。
 - **CI**：GitHub Actions 双平台（Ubuntu gcc / Windows MSVC）构建 + ctest。
@@ -62,14 +64,16 @@
 
 ## 5. 工程约束
 
-- C++20，头文件在 `include/daisy`，实现分散到 `src/`，命名空间 `daisy::`。
-- 所有外部工具（ffmpeg、whisper-cli、demucs …）通过子进程调用，与 C# 版一致
+- C++20，头文件在 `include/iris`，实现分散到 `src/`，命名空间 `iris::`。
+- ASR 推理已内嵌进本体（CrispASR / CTranslate2，经 CMake FetchContent 锁版本），
+  不再调用 whisper-cli 等外部推理工具；ffmpeg、VSF 等媒体工具保留子进程调用
   （生产级进程管理将逐步替换 `popen` 为真正的进程 API）。
-- 模型与工具首次使用自动下载，镜像策略（hf-mirror / gh-proxy）保持与 C# 版一致。
+- 模型与工具（ffmpeg 等）由用户自行准备；自动下载与镜像策略（hf-mirror /
+  gh-proxy）规划中，未实现。
 - 依赖全部经 CMake FetchContent，锁版本（见 `cmake/dependencies.cmake`）。
 
 ## 6. 验证
 
 - 单元测试：`ctest --test-dir build --output-on-failure`（时间码 / 渲染 / IR 往返）。
 - CI：push/PR 触发双平台构建 + 测试。
-- 端到端（本地）：`daisy asr <media> --model <ggml>.bin` → `daisy build out.daisy.json`。
+- 端到端（本地）：`iris asr <media> --model <ggml>.bin` → `iris build out.iris.json`。

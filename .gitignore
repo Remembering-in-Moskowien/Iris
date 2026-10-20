@@ -20,7 +20,7 @@ CMakeUserPresets.json
 /.local/
 /artifacts/
 *.log
-daisy.config.json
+iris.config.json
 /tools/
 /models/
 /tools/_shots/

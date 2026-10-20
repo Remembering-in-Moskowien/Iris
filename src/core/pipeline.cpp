@@ -1,10 +1,10 @@
-#include "daisy/core/pipeline.hpp"
+#include "iris/core/pipeline.hpp"
 
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace daisy::core {
+namespace iris::core {
 
 void Pipeline::add(std::shared_ptr<Operator> op) { ops_.push_back(std::move(op)); }
 
@@ -61,4 +61,4 @@ bool Pipeline::run(PipelineContext& ctx) {
     return true;
 }
 
-} // namespace daisy::core
+} // namespace iris::core

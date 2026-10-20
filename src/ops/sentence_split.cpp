@@ -1,12 +1,12 @@
-#include "daisy/ops/sentence_split.hpp"
+#include "iris/ops/sentence_split.hpp"
 
 #include <algorithm>
 #include <string>
 #include <vector>
 
-#include "daisy/infra/log.hpp"
+#include "iris/infra/log.hpp"
 
-namespace daisy::ops {
+namespace iris::ops {
 
 // 简易 rule 策略：按标点切分长句（对应 C# SentenceSplitStrategy.Rule）。
 namespace {
@@ -79,4 +79,4 @@ bool SentenceSplit::execute(core::PipelineContext& ctx) {
     return true;
 }
 
-} // namespace daisy::ops
+} // namespace iris::ops

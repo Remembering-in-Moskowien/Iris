@@ -1,9 +1,9 @@
-#include "daisy/ops/audio_preprocess.hpp"
+#include "iris/ops/audio_preprocess.hpp"
 
-#include "daisy/infra/log.hpp"
-#include "daisy/infra/process.hpp"
+#include "iris/infra/log.hpp"
+#include "iris/infra/process.hpp"
 
-namespace daisy::ops {
+namespace iris::ops {
 
 bool AudioPreprocess::execute(core::PipelineContext& ctx) {
     if (!ctx.doc) return false;
@@ -35,4 +35,4 @@ bool AudioPreprocess::execute(core::PipelineContext& ctx) {
     return true;
 }
 
-} // namespace daisy::ops
+} // namespace iris::ops

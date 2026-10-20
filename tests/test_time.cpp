@@ -1,8 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "daisy/model/time.hpp"
+#include "iris/model/time.hpp"
 
-using daisy::model::TimeCode;
+using iris::model::TimeCode;
 
 TEST_CASE("ASS timecode parses to milliseconds") {
     auto t = TimeCode::parse_ass("0:00:01.50");

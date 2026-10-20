@@ -1,8 +1,8 @@
-#include "daisy/model/config.hpp"
+#include "iris/model/config.hpp"
 
 #include <fstream>
 
-namespace daisy::model {
+namespace iris::model {
 
 nlohmann::json AppConfig::to_json() const {
     return {{"downloadProxy", download_proxy},
@@ -37,4 +37,4 @@ void AppConfig::save(const std::string& path) const {
     out << to_json().dump(2) << '\n';
 }
 
-} // namespace daisy::model
+} // namespace iris::model

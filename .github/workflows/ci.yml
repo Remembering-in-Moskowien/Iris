@@ -28,7 +28,7 @@ jobs:
           arch: x64
 
       - name: Configure
-        run: cmake -S . -B build -DDAISY_BUILD_TESTS=ON
+        run: cmake -S . -B build -DIRIS_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel

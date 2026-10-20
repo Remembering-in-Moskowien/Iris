@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include "daisy/model/subtitle.hpp"
+#include "iris/model/subtitle.hpp"
 
-using daisy::model::SubtitleDocument;
-using daisy::model::SubtitleLine;
-using daisy::model::TimeCode;
+using iris::model::SubtitleDocument;
+using iris::model::SubtitleLine;
+using iris::model::TimeCode;
 
 TEST_CASE("ASS render includes script header and dialogue line") {
     SubtitleDocument doc;
@@ -37,7 +37,7 @@ TEST_CASE("ASS braces in text are escaped") {
 }
 
 TEST_CASE("Style line contains font and size") {
-    daisy::model::AssStyle style;
+    iris::model::AssStyle style;
     style.name = "Sub";
     style.font_name = "Noto Sans";
     style.font_size = 24;
