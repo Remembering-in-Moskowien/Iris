@@ -1,0 +1,53 @@
+name: Release
+
+# 鑷姩鍙戝竷锛歱ush master 鎴栨墜鍔ㄨЕ鍙戝嵆鏋勫缓 Windows 渚挎惡鍖呭苟鍙戝竷鍒?GitHub Releases銆?# 鐗堟湰鍙?= GitHub 杩愯鍙凤紙鏋勫缓鍙凤級锛歵ag = v{run_number}锛宨ris --version = 0.1.{run_number}銆?# 杩愯鏃?DLL锛坈rispasr/ctranslate2/onnxruntime锛変笉鍦ㄤ粨搴撳唴锛屼粠 runtime-bootstrap release 鎷夊彇鍚庝笌 iris.exe 鎵撳寘銆?
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Activate MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        run: cmake -S . -B build -DIRIS_BUILD_TESTS=OFF -DIRIS_BUILD_NUMBER=${{ github.run_number }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Assemble portable dist
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          gh release download runtime-bootstrap `
+            --repo ${{ github.repository }} `
+            --pattern "iris-runtime-win-x64.zip" `
+            --dir dist
+          Expand-Archive -Path "dist/iris-runtime-win-x64.zip" -DestinationPath dist -Force
+          Remove-Item "dist/iris-runtime-win-x64.zip"
+          Copy-Item "build/bin/Release/iris.exe" "dist/"
+          Get-ChildItem dist | ForEach-Object { Write-Host $_.Name }
+
+      - name: Package zip
+        shell: pwsh
+        run: Compress-Archive -Path "dist/*" -DestinationPath "iris-${{ github.run_number }}-win-x64.zip"
+
+      - name: Publish release
+        shell: pwsh
+        run: |
+          gh release create "v${{ github.run_number }}" `
+            --repo ${{ github.repository }} `
+            --title "v${{ github.run_number }}" `
+            --notes "Automated release (build ${{ github.run_number }}). Portable Windows x64 build: iris.exe bundled with crispasr/ctranslate2/onnxruntime runtime DLLs. Requires ffmpeg on PATH for media conversion." `
+            "iris-${{ github.run_number }}-win-x64.zip"
