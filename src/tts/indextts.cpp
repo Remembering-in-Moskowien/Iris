@@ -57,7 +57,7 @@ constexpr int kWinSize = 1024;
 // ---------------------------------------------------------------------------
 struct OrtSession {
     std::unique_ptr<Ort::Session> sess;
-    std::string in_name, out_name;
+    std::vector<std::string> in_names, out_names;
 };
 
 OrtSession make_session(Ort::Env& env, const std::string& path, int threads = 4) {
@@ -72,13 +72,15 @@ OrtSession make_session(Ort::Env& env, const std::string& path, int threads = 4)
     for (const char c : path) wpath.push_back(static_cast<wchar_t>(static_cast<unsigned char>(c)));
     s.sess = std::make_unique<Ort::Session>(env, wpath.c_str(), opts);
     Ort::AllocatorWithDefaultOptions alloc;
-    s.in_name = s.sess->GetInputNameAllocated(0, alloc).get();
-    s.out_name = s.sess->GetOutputNameAllocated(0, alloc).get();
+    for (std::size_t i = 0; i < s.sess->GetInputCount(); ++i)
+        s.in_names.push_back(s.sess->GetInputNameAllocated(i, alloc).get());
+    for (std::size_t i = 0; i < s.sess->GetOutputCount(); ++i)
+        s.out_names.push_back(s.sess->GetOutputNameAllocated(i, alloc).get());
     return s;
 }
 
 // ---------------------------------------------------------------------------
-// WAV 读取（16kHz / 22050Hz float32）
+// WAV 读取（16-bit PCM → float32 [-1,1]）
 // ---------------------------------------------------------------------------
 bool read_wav_float(const std::string& path, std::vector<float>& out, int& sr) {
     std::ifstream f(path, std::ios::binary);
@@ -120,62 +122,65 @@ bool read_wav_float(const std::string& path, std::vector<float>& out, int& sr) {
 }
 
 // ---------------------------------------------------------------------------
-// Mel spectrogram（22050Hz, 80 mel, n_fft=1024, hop=256, center=False）
+// WAV 写出（float32 → 16-bit PCM）
 // ---------------------------------------------------------------------------
-std::vector<float> mel_spectrogram(const std::vector<float>& y) {
-    // 简化版：STFT + mel filterbank（与 librosa mel 近似）
-    const int pad = (kNFFT - kHopSize) / 2;
-    std::vector<float> padded(y.size() + 2 * pad);
-    for (int i = 0; i < pad; ++i) padded[i] = y[pad - i];  // reflect
-    for (size_t i = 0; i < y.size(); ++i) padded[pad + i] = y[i];
-    for (int i = 0; i < pad; ++i) padded[pad + y.size() + i] = y[y.size() - 1 - i];
-
-    int n_frames = 1 + (static_cast<int>(padded.size()) - kNFFT) / kHopSize;
-    std::vector<float> mel(n_frames * kNMelBins, 0.0f);
-
-    // Hann window
-    std::vector<float> win(kWinSize);
-    for (int i = 0; i < kWinSize; ++i)
-        win[i] = 0.5f - 0.5f * std::cos(2.0f * 3.14159265f * i / kWinSize);
-
-    // 简化：每帧做 RFFT（用 DFT 近似，实际应替换为 FFT）
-    // TODO: 替换为高效 FFT（当前 O(n^2) 仅用于验证流程）
-    for (int fr = 0; fr < n_frames; ++fr) {
-        for (int m = 0; m < kNMelBins; ++m) {
-            float mag_sum = 0.0f;
-            // 简化：直接累加帧能量作为 mel bin 近似
-            for (int k = 0; k < kNFFT; k += 4) {
-                float v = padded[fr * kHopSize + k] * win[k];
-                mag_sum += v * v;
-            }
-            mel[fr * kNMelBins + m] = std::log(std::max(mag_sum, 1e-5f));
-        }
+bool write_wav_float(const std::string& path, const std::vector<float>& in, int sr) {
+    std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+    int16_t channels = 1, bps = 16;
+    uint32_t data_size = static_cast<uint32_t>(in.size() * 2);
+    f.write("RIFF", 4);
+    uint32_t chunk_size = 36 + data_size;
+    f.write(reinterpret_cast<char*>(&chunk_size), 4);
+    f.write("WAVE", 4);
+    f.write("fmt ", 4);
+    uint32_t fmt_size = 16;
+    f.write(reinterpret_cast<char*>(&fmt_size), 4);
+    int16_t audio_fmt = 1;
+    f.write(reinterpret_cast<char*>(&audio_fmt), 2);
+    f.write(reinterpret_cast<char*>(&channels), 2);
+    f.write(reinterpret_cast<char*>(&sr), 4);
+    uint32_t byte_rate = sr * channels * bps / 8;
+    f.write(reinterpret_cast<char*>(&byte_rate), 4);
+    int16_t block_align = channels * bps / 8;
+    f.write(reinterpret_cast<char*>(&block_align), 2);
+    f.write(reinterpret_cast<char*>(&bps), 2);
+    f.write("data", 4);
+    f.write(reinterpret_cast<char*>(&data_size), 4);
+    for (float v : in) {
+        int16_t s = static_cast<int16_t>(std::max(-32767.0f, std::min(32767.0f, v * 32767.0f)));
+        f.write(reinterpret_cast<char*>(&s), 2);
     }
-    return mel;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
-// tiktoken BPE 加载（简化版：直接字符级编码）
+// tiktoken BPE（简化：UTF-8 字节级编码）
 // ---------------------------------------------------------------------------
 std::vector<int64_t> simple_tokenize(const std::string& text) {
     std::vector<int64_t> ids;
-    for (char c : text) ids.push_back(static_cast<int64_t>(static_cast<unsigned char>(c)));
+    for (unsigned char c : text) ids.push_back(c);
     return ids;
 }
 
 // ---------------------------------------------------------------------------
-// GPT 自回归采样（greedy）
+// ONNX Run 辅助：单输入单输出
 // ---------------------------------------------------------------------------
-std::vector<int64_t> gpt_generate(OrtSession& pre, OrtSession& step,
-                                   const std::vector<int64_t>& text_ids,
-                                   const std::vector<float>& conds,
-                                   int lang_id, int max_tokens = 200) {
-    // TODO: 完整 GPT prefill/step + kv cache + repetition penalty + top_k/top_p
-    // 当前骨架：调用 prefill 取 logits，argmax 取第一个 token
-    (void)step; (void)max_tokens;
-    std::vector<int64_t> codes;
-    // 简化：返回空（完整 kv cache 编排待模型就位后调试）
-    return codes;
+template <typename T>
+std::vector<T> run_single(OrtSession& sess, const char* in_name, std::vector<T>& in_data,
+                          const std::vector<int64_t>& in_shape) {
+    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    Ort::Value in = Ort::Value::CreateTensor<T>(mem, in_data.data(), in_data.size(),
+                                                in_shape.data(), in_shape.size());
+    const char* in_names[1] = {in_name};
+    const char* out_names[1] = {sess.out_names[0].c_str()};
+    auto outs = sess.sess->Run(Ort::RunOptions{}, in_names, &in, 1, out_names, 1);
+    T* ptr = outs[0].GetTensorMutableData<T>();
+    auto info = outs[0].GetTensorTypeAndShapeInfo();
+    auto dims = info.GetShape();
+    size_t total = 1;
+    for (auto d : dims) total *= (d > 0 ? static_cast<size_t>(d) : 1);
+    return std::vector<T>(ptr, ptr + total);
 }
 
 } // namespace
@@ -196,7 +201,8 @@ bool synth_indextts(const std::string& model_dir,
     const std::vector<std::string> required = {
         "campplus.onnx", "emo_vec.onnx", "length_regulator.onnx",
         "semantic_codec_decode.onnx", "bigvgan.onnx", "spk_proj.npz",
-        "multilingual_zh_ja_yue_char_del.tiktoken"
+        "gpt_prefill/gpt_prefill.onnx", "gpt_step/gpt_step.onnx",
+        "cfm_estimator/cfm_estimator.onnx", "semantic_model/semantic_model.onnx"
     };
     for (const auto& f : required) {
         if (!fs::exists(fs::path(model_dir) / f)) {
@@ -206,7 +212,7 @@ bool synth_indextts(const std::string& model_dir,
     }
 
     // 2. 加载参考音频
-    std::vector<float> audio_22k, audio_16k;
+    std::vector<float> audio_22k;
     int sr = 0;
     if (!read_wav_float(ref_wav, audio_22k, sr)) {
         error = "无法读取参考音频：" + ref_wav;
@@ -216,7 +222,7 @@ bool synth_indextts(const std::string& model_dir,
                                static_cast<size_t>(kMaxRefSeconds * kSamplingRate)));
     spdlog::info("tts: 参考音频 {} samples @ {} Hz", audio_22k.size(), sr);
 
-    // 3. ONNX 环境 + session 加载
+    // 3. ONNX 环境 + 9 个 session 加载
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "iris-tts");
     try {
         auto campplus = make_session(env, model_dir + "/campplus.onnx");
@@ -224,26 +230,30 @@ bool synth_indextts(const std::string& model_dir,
         auto len_reg = make_session(env, model_dir + "/length_regulator.onnx");
         auto codec = make_session(env, model_dir + "/semantic_codec_decode.onnx");
         auto bigvgan = make_session(env, model_dir + "/bigvgan.onnx");
-        spdlog::info("tts: 5 个平面 ONNX session 加载完成");
-
-        // 子目录模型（gpt/cfm/semantic_model）
         auto gpt_pre = make_session(env, model_dir + "/gpt_prefill/gpt_prefill.onnx");
         auto gpt_step = make_session(env, model_dir + "/gpt_step/gpt_step.onnx");
         auto cfm = make_session(env, model_dir + "/cfm_estimator/cfm_estimator.onnx");
         auto semantic = make_session(env, model_dir + "/semantic_model/semantic_model.onnx");
-        spdlog::info("tts: 4 个子目录 ONNX session 加载完成（共 9 个）");
+        spdlog::info("tts: 9 个 ONNX session 全部加载完成");
 
-        // 4. build_speaker（简化骨架）
-        // TODO: w2v-bert features → semantic_model → emo_vec → campplus → spk_proj
-        spdlog::warn("tts: build_speaker 完整编排待调试（w2v-bert features/spk_proj 加载）");
+        // 4. build_speaker（w2v-bert features → semantic_model → emo_vec → campplus → spk_proj）
+        // TODO: w2v-bert feature extraction (SeamlessM4T, 80 mel, stride=2)
+        // TODO: spk_proj.npz 加载 + style @ W.T + B
+        spdlog::warn("tts: build_speaker DSP 待调试（w2v-bert features/spk_proj）");
 
-        // 5. synthesize（简化骨架）
+        // 5. synthesize（tokenize → gpt → codec → len_reg → cfm → bigvgan）
         auto text_ids = simple_tokenize(text);
         spdlog::info("tts: 文本 tokenize 完成（{} tokens）", text_ids.size());
-        // TODO: gpt_generate → codec_decode → len_reg → cfm solver → bigvgan → wav
 
-        (void)out_wav;
-        error = "IndexTTS 编排框架已就位；完整 DSP/GPT/CFM 编排待模型权重调试";
+        // 6. TODO: gpt prefill/step 自回归采样 + kv cache
+        // TODO: semantic_codec_decode
+        // TODO: length_regulator
+        // TODO: CFM Euler solver (25 steps, CFG)
+        // TODO: bigvgan mel → wav
+        // TODO: write_wav_float(out_wav, wav, 22050)
+
+        error = "IndexTTS 编排框架已就位（9 session 加载 + DSP 骨架）；"
+                "完整 GPT/CFM 编排待模型权重调试";
         return false;
     } catch (const Ort::Exception& e) {
         error = std::string("ONNX 加载失败：") + e.what();
