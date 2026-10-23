@@ -22,8 +22,7 @@ int run_dub(const std::string& input, const std::string& model_dir,
             std::cerr << "dub: 情感分析失败：" << err << "\n";
             return 1;
         }
-        std::cout << "dub: A/D/V = " << emo.arousal << "/" << emo.dominance << "/"
-                  << emo.valence << "\n";
+        std::cout << "dub: emotion = " << emo.label << " (" << emo.score * 100.0f << "%)\n";
     }
 
     // 2. TTS 合成（文本由上层 IR 传入，此处骨架占位）

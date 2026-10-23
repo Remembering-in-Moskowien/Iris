@@ -4,15 +4,15 @@
 
 namespace iris::emotion {
 
-/// 情感分析结果（A/D/V 三维连续值，0~1）。
+/// 情感分析结果（6 类分类）。
 struct EmotionResult {
-    float arousal = 0.0f;    // 唤醒度（平静↔激动）
-    float dominance = 0.0f;  // 支配度（顺从↔主导）
-    float valence = 0.0f;    // 效价（消极↔积极）
+    std::string label;       // SAD / ANGRY / DISGUST / FEAR / HAPPY / NEUTRAL
+    float score = 0.0f;      // softmax 置信度
+    float scores[6] = {};    // 各类置信度（按 id2label 顺序）
 };
 
-/// 语音情感分析（Wav2Small 风格 ONNX，72K 参数，60KB 量化）。
-/// 输入 16kHz 单声道 WAV；输出 A/D/V 三维。
+/// 语音情感分类（wav2vec2-base, DunnBC22 微调, int8 ONNX, ~95MB）。
+/// 输入 16kHz 单声道 WAV；输出 6 类情绪 softmax。
 /// 运行时引用 tools/runtimes/onnx 打包的 onnxruntime DLL。
 bool analyze_emotion(const std::string& onnx_path,
                      const std::string& wav_path,
