@@ -55,6 +55,7 @@ add_library(iris_core
     src/view/subtitle_renderer.cpp
     src/infra/process.cpp
     src/infra/pipe_reader.cpp
+    src/infra/i18n.cpp
     src/ops/vsf.cpp
     src/tts/indextts.cpp
     src/emotion/emotion.cpp)

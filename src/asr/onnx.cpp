@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "iris/asr/ct2_mel.hpp"
+#include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
 
 #if IRIS_HAS_ONNX
@@ -66,7 +67,8 @@ bool load_tokenizer(const std::string& model_dir, OnnxTokenizer& tok, std::strin
     try {
         f >> j;
     } catch (const std::exception& e) {
-        error = std::string("onnx: tokenizer.json 解析失败: ") + e.what();
+        error = i18n::tr("onnx: tokenizer.json parse failed", "onnx: tokenizer.json 解析失败");
+        spdlog::debug("onnx tokenizer exception: {}", e.what());
         return false;
     }
     const auto& vocab = j.at("model").at("vocab");
@@ -181,7 +183,8 @@ bool open_session(const Ort::Env& env, const std::string& path, Ort::SessionOpti
         for (const char c : path) wpath.push_back(static_cast<wchar_t>(static_cast<unsigned char>(c)));
         sess.session = std::make_unique<Ort::Session>(env, wpath.c_str(), opts);
     } catch (const Ort::Exception& e) {
-        error = std::string("onnx: 加载 ") + path + " 失败: " + e.what();
+        error = i18n::tr("onnx: model load failed", "onnx: 模型加载失败");
+        spdlog::debug("onnx session load exception: {}", e.what());
         return false;
     }
     const Ort::AllocatorWithDefaultOptions alloc;
@@ -535,10 +538,12 @@ bool transcribe_onnx(const std::string& model_dir, const std::string& audio_path
     try {
         return transcribe_onnx_impl(model_dir, audio_path, language, out, error);
     } catch (const Ort::Exception& e) {
-        error = std::string("onnx: ") + e.what();
+        error = i18n::tr("onnx: inference failed", "onnx: 推理失败");
+        spdlog::debug("onnx inference exception: {}", e.what());
         return false;
     } catch (const std::exception& e) {
-        error = std::string("onnx: ") + e.what();
+        error = i18n::tr("onnx: internal error", "onnx: 内部错误");
+        spdlog::debug("onnx internal exception: {}", e.what());
         return false;
     }
 #else

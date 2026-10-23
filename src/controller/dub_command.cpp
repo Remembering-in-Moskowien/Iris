@@ -4,6 +4,7 @@
 #include <string>
 
 #include "iris/emotion/emotion.hpp"
+#include "iris/infra/i18n.hpp"
 #include "iris/tts/indextts.hpp"
 
 namespace iris::controller {
@@ -19,14 +20,15 @@ int run_dub(const std::string& input, const std::string& model_dir,
     emotion::EmotionResult emo;
     if (!onnx_emotion.empty()) {
         if (!emotion::analyze_emotion(onnx_emotion, input, emo, err)) {
-            std::cerr << "dub: 情感分析失败：" << err << "\n";
+            std::cerr << _("dub: emotion analysis failed: ", "dub: 情感分析失败：") << err << "\n";
             return 1;
         }
         std::cout << "dub: emotion = " << emo.label << " (" << emo.score * 100.0f << "%)\n";
     }
 
     // 2. TTS 合成（文本由上层 IR 传入，此处骨架占位）
-    std::cout << "dub: 串联完成（asr → emotion → tts）；完整编排待 TTS 引擎就绪\n";
+    std::cout << _("dub: chain done (asr -> emotion -> tts); full TTS orchestration pending\n",
+                    "dub: 串联完成（asr → emotion → tts）；完整编排待 TTS 引擎就绪\n");
     (void)model_dir; (void)ref_wav; (void)out_wav;
     return 0;
 }
