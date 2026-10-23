@@ -15,9 +15,13 @@ int run_emotion(const std::string& onnx_path, const std::string& wav_path) {
         return 1;
     }
     std::cout << "emotion: " << wav_path << "\n"
-              << "  arousal    = " << r.arousal << "\n"
-              << "  dominance  = " << r.dominance << "\n"
-              << "  valence    = " << r.valence << "\n";
+              << "  " << r.label << "  (" << r.score * 100.0f << "%)\n"
+              << "  scores: SAD=" << r.scores[0]
+              << " ANGRY=" << r.scores[1]
+              << " DISGUST=" << r.scores[2]
+              << " FEAR=" << r.scores[3]
+              << " HAPPY=" << r.scores[4]
+              << " NEUTRAL=" << r.scores[5] << "\n";
     return 0;
 }
 

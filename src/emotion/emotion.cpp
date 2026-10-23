@@ -1,13 +1,15 @@
 // ============================================================================
-// 语音情感分析（Wav2Small 风格 ONNX）—— 运行时引用 onnxruntime DLL。
+// 语音情感分类（wav2vec2-base, DunnBC22/wav2vec2-base-SER 微调, int8 ONNX）
+// 运行时引用 onnxruntime DLL。
 //
-// 模型：72K 参数 VGG7 + Bayesian pool，输入 16kHz 单声道波形，
-//       输出 Arousal / Dominance / Valence 三维连续值（0~1）。
-// 量化后 ~60KB，CPU 推理 <10ms。
+// 输入：16kHz 单声道波形（float32, per-utterance 归一化）
+// 输出：6 类 softmax（SAD/ANGRY/DISGUST/FEAR/HAPPY/NEUTRAL）
+// 模型：~95MB int8，CPU 推理 <200ms。
 // ============================================================================
 
 #include "iris/emotion/emotion.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -27,7 +29,8 @@ namespace iris::emotion {
 #if IRIS_HAS_ONNX
 namespace {
 
-// 读 16kHz 单声道 WAV → float32 [-1,1]
+const char* kLabels[6] = {"SAD", "ANGRY", "DISGUST", "FEAR", "HAPPY", "NEUTRAL"};
+
 bool read_wav_16k(const std::string& path, std::vector<float>& pcm, std::string& err) {
     std::ifstream f(path, std::ios::binary);
     if (!f) { err = "无法打开 WAV：" + path; return false; }
@@ -36,7 +39,6 @@ bool read_wav_16k(const std::string& path, std::vector<float>& pcm, std::string&
     f.seekg(4, std::ios::cur);
     char wave[4]; f.read(wave, 4);
     if (std::memcmp(wave, "WAVE", 4) != 0) { err = "非 WAVE"; return false; }
-    // 遍历 chunk 找 fmt / data
     int16_t channels = 0, bps = 0;
     uint32_t sample_rate = 0;
     std::vector<char> data;
@@ -64,8 +66,6 @@ bool read_wav_16k(const std::string& path, std::vector<float>& pcm, std::string&
     size_t n = data.size() / 2;
     pcm.resize(n);
     for (size_t i = 0; i < n; ++i) pcm[i] = s16[i] / 32768.0f;
-    (void)channels;
-    (void)sample_rate;
     return true;
 }
 
@@ -82,30 +82,64 @@ bool analyze_emotion(const std::string& onnx_path,
 #else
     std::vector<float> pcm;
     if (!read_wav_16k(wav_path, pcm, error)) return false;
+    if (pcm.empty()) { error = "WAV 为空"; return false; }
+
+    // per-utterance 归一化（do_normalize=true：减均值除标准差）
+    double mean = 0.0;
+    for (float v : pcm) mean += v;
+    mean /= pcm.size();
+    double var = 0.0;
+    for (float v : pcm) var += (v - mean) * (v - mean);
+    var /= pcm.size();
+    float stdv = static_cast<float>(std::sqrt(var + 1e-7));
+    for (auto& v : pcm) v = static_cast<float>((v - mean) / stdv);
 
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "iris-emotion");
     Ort::SessionOptions so_opts;
-    so_opts.SetIntraOpNumThreads(1);
+    so_opts.SetIntraOpNumThreads(4);
     std::wstring wpath;
     for (const char c : onnx_path) wpath.push_back(static_cast<wchar_t>(static_cast<unsigned char>(c)));
-    Ort::Session session(env, wpath.c_str(), so_opts);
+    std::unique_ptr<Ort::Session> session;
+    try {
+        session = std::make_unique<Ort::Session>(env, wpath.c_str(), so_opts);
+    } catch (const Ort::Exception& e) {
+        error = std::string("ONNX 加载失败：") + e.what();
+        return false;
+    }
 
     Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::vector<int64_t> shape = {1, static_cast<int64_t>(pcm.size())};
     Ort::Value in = Ort::Value::CreateTensor<float>(mem, pcm.data(), pcm.size(),
                                                     shape.data(), shape.size());
 
-    const char* in_names[] = {"waveform"};
-    const char* out_names[] = {"predictions"};
-    auto outs = session.Run(Ort::RunOptions{}, in_names, &in, 1, out_names, 1);
+    Ort::AllocatorWithDefaultOptions alloc;
+    std::string in_name = session->GetInputNameAllocated(0, alloc).get();
+    std::string out_name = session->GetOutputNameAllocated(0, alloc).get();
+    const char* in_names[1] = {in_name.c_str()};
+    const char* out_names[1] = {out_name.c_str()};
+    auto outs = session->Run(Ort::RunOptions{}, in_names, &in, 1, out_names, 1);
 
-    float* ptr = outs[0].GetTensorMutableData<float>();
+    float* logits = outs[0].GetTensorMutableData<float>();
     auto info = outs[0].GetTensorTypeAndShapeInfo();
     auto dims = info.GetShape();
-    // 输出 shape: (1, 3) → arousal, dominance, valence
-    out.arousal    = dims.size() >= 2 && dims[1] >= 3 ? ptr[0] : ptr[0];
-    out.dominance  = dims.size() >= 2 && dims[1] >= 3 ? ptr[1] : 0.5f;
-    out.valence    = dims.size() >= 2 && dims[1] >= 3 ? ptr[2] : 0.5f;
+    int n_cls = dims.size() >= 2 ? static_cast<int>(dims[1]) : 6;
+    if (n_cls > 6) n_cls = 6;
+
+    // softmax
+    float maxv = logits[0];
+    for (int i = 1; i < n_cls; ++i) maxv = std::max(maxv, logits[i]);
+    float sum = 0.0f;
+    for (int i = 0; i < n_cls; ++i) {
+        out.scores[i] = std::exp(logits[i] - maxv);
+        sum += out.scores[i];
+    }
+    int best = 0;
+    for (int i = 0; i < n_cls; ++i) {
+        out.scores[i] /= sum;
+        if (out.scores[i] > out.scores[best]) best = i;
+    }
+    out.label = kLabels[best];
+    out.score = out.scores[best];
     return true;
 #endif
 }
