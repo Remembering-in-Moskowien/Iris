@@ -5,7 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 鍏ㄩ」鐩潤鎬?CRT锛?MT锛夛紝涓庡唴宓?CT2 闈欐€佸簱鐨勮繍琛屾椂涓€鑷达紝閬垮厤 LNK2038銆?if(MSVC)
+# 全项目静态 CRT（/MT），与内嵌 CT2 静态库的运行时一致，避免 LNK2038。
+if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>" CACHE STRING "MSVC runtime library" FORCE)
 endif()
 
@@ -15,7 +16,8 @@ endif()
 
 option(IRIS_BUILD_TESTS "Build the test suite" ON)
 
-# 鏋勫缓鍙凤細CI 娉ㄥ叆 GitHub run number锛況elease tag = v{run_number}锛?-version 鍚屾鏄剧ず銆?set(IRIS_BUILD_NUMBER "" CACHE STRING "Build number appended to version (CI run number)")
+# 构建号：CI 注入 GitHub run number；release tag = v{run_number}，--version 同步显示。
+set(IRIS_BUILD_NUMBER "" CACHE STRING "Build number appended to version (CI run number)")
 if(IRIS_BUILD_NUMBER)
   set(IRIS_VERSION_STRING "0.1.${IRIS_BUILD_NUMBER}")
 else()
@@ -27,10 +29,15 @@ message(STATUS "Iris: version ${IRIS_VERSION_STRING}")
 include(cmake/dependencies.cmake)
 
 # ---------------------------------------------------------------------------
-# MVC 鍒嗗眰锛圡odel-View-Controller锛夛細
-#   model/      M 鈥?鏁版嵁妯″瀷涓?IR 濂戠害
-#   view/       V 鈥?瀛楀箷娓叉煋锛圓SS/SRT/TXT锛変笌鎺у埗鍙板憟鐜?#   controller/ C 鈥?鍛戒护澶勭悊鍣紙asr/build/validate/doctor/models锛?#   core/      寮曟搸锛氱绾?鎿嶄綔绗?鎻愪緵鑰呮敞鍐岃〃锛圕ontroller 涓?ops 鐨勫簳搴э級
-#   ops/       涓氬姟鎿嶄綔绗︼紙鏈嶅姟灞傦細杞爜/棰勫鐞?杞啓/鍒嗗彞锛?#   asr/       ASR 妯″潡锛氳繘绋嬪唴鎺ㄧ悊鍚庣锛圕rispASR ggml / CTranslate2锛?#   infra/     鍩虹璁炬柦锛堟棩蹇椼€佸瓙杩涚▼锛?# ---------------------------------------------------------------------------
+# MVC 分层（Model-View-Controller）：
+#   model/      M — 数据模型与 IR 契约
+#   view/       V — 字幕渲染（ASS/SRT/TXT）与控制台呈现
+#   controller/ C — 命令处理器（asr/build/validate/doctor/models）
+#   core/      引擎：管线/操作符/提供者注册表（Controller 与 ops 的底座）
+#   ops/       业务操作符（服务层：转码/预处理/转写/分句）
+#   asr/       ASR 模块：进程内推理后端（CrispASR ggml / CTranslate2）
+#   infra/     基础设施（日志、子进程）
+# ---------------------------------------------------------------------------
 add_library(iris_core
     src/core/pipeline.cpp
     src/core/provider.cpp
@@ -61,7 +68,8 @@ target_link_libraries(iris_core PUBLIC
     nlohmann_json::nlohmann_json
     spdlog::spdlog)
 
-# ASR 鎺ㄧ悊鍚庣锛氳繍琛屾椂浠ユ墦鍖?DLL 寮曠敤锛坱ools/runtimes锛屼笉鍐呭祵婧愮爜锛夈€?if(IRIS_HAS_CRISPASR)
+# ASR 推理后端：运行时以打包 DLL 引用（tools/runtimes，不内嵌源码）。
+if(IRIS_HAS_CRISPASR)
     target_link_libraries(iris_core PUBLIC iris_crispasr)
 endif()
 if(IRIS_HAS_CT2)
@@ -72,7 +80,8 @@ if(IRIS_HAS_ONNX)
 endif()
 
 # ---------------------------------------------------------------------------
-# CLI executable锛堣杽澹筹細CLI11 瑙ｆ瀽 鈫?鍒嗗彂鍒?controller/锛?# ---------------------------------------------------------------------------
+# CLI executable（薄壳：CLI11 解析 → 分发到 controller/）
+# ---------------------------------------------------------------------------
 add_executable(iris
     src/main.cpp
     src/cli/cli.cpp
