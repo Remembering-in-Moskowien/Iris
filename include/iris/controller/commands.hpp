@@ -30,4 +30,7 @@ int run_doctor();
 /// models list：列出已注册提供者。
 int run_models_list();
 
+/// vsf：视频硬字幕帧定位（自实现 VSF，输出 SRT 时间轴段，文本留空待 OCR）。
+int run_vsf(const std::string& input, const std::string& output, double sample_fps);
+
 } // namespace iris::controller
