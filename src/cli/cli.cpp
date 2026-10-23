@@ -48,6 +48,15 @@ int run(int argc, char** argv) {
     std::string models_sub = "list";
     models->add_option("sub", models_sub, "Subcommand (list)");
 
+    // ---- vsf ----
+    auto* vsf = app.add_subcommand("vsf", "Detect hard-subtitle frames in a video (self-implemented VSF)");
+    std::string vsf_input, vsf_output;
+    double vsf_fps = 0.5;
+    vsf->add_option("input", vsf_input, "Input video file")->required();
+    vsf->add_option("--output,-o", vsf_output, "Output SRT path");
+    vsf->add_option("--fps", vsf_fps, "Frame sample rate (default 0.5 = one frame per 2s)")
+        ->check(CLI::Range(0.1, 10.0));
+
     // ---- init ----
     app.add_subcommand("init", "Interactive setup (stub, planned)");
 
@@ -60,6 +69,7 @@ int run(int argc, char** argv) {
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
     if (models->parsed()) return controller::run_models_list();
+    if (vsf->parsed()) return controller::run_vsf(vsf_input, vsf_output, vsf_fps);
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << "init: 交互式设置将在后续版本实现\n";
