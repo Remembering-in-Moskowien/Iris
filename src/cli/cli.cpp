@@ -1,5 +1,6 @@
 #include "iris/cli/cli.hpp"
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 
@@ -49,10 +50,11 @@ int run(int argc, char** argv) {
     models->add_option("sub", models_sub, "Subcommand (list)");
 
     // ---- vsf ----
-    auto* vsf = app.add_subcommand("vsf", "Detect hard-subtitle frames in a video (self-implemented VSF)");
-    std::string vsf_input, vsf_output;
+    auto* vsf = app.add_subcommand("vsf", "Detect hard-subtitle frames in a fixed ROI (self-implemented, no OpenCV)");
+    std::string vsf_input, vsf_output, vsf_roi_str;
     double vsf_fps = 0.5;
     vsf->add_option("input", vsf_input, "Input video file")->required();
+    vsf->add_option("--roi", vsf_roi_str, "ROI as x,y,w,h in pixels (required)")->required();
     vsf->add_option("--output,-o", vsf_output, "Output SRT path");
     vsf->add_option("--fps", vsf_fps, "Frame sample rate (default 0.5 = one frame per 2s)")
         ->check(CLI::Range(0.1, 10.0));
@@ -69,7 +71,14 @@ int run(int argc, char** argv) {
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
     if (models->parsed()) return controller::run_models_list();
-    if (vsf->parsed()) return controller::run_vsf(vsf_input, vsf_output, vsf_fps);
+    if (vsf->parsed()) {
+        int rx=0, ry=0, rw=0, rh=0;
+        if (std::sscanf(vsf_roi_str.c_str(), "%d,%d,%d,%d", &rx, &ry, &rw, &rh) != 4) {
+            std::cerr << "--roi 格式应为 x,y,w,h（像素）\n";
+            return 1;
+        }
+        return controller::run_vsf(vsf_input, vsf_output, rx, ry, rw, rh, vsf_fps);
+    }
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << "init: 交互式设置将在后续版本实现\n";
