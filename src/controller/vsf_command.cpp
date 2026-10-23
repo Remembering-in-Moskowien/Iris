@@ -25,12 +25,13 @@ std::string srt_timestamp(double sec) {
 
 } // namespace
 
-int run_vsf(const std::string& input, const std::string& output, double sample_fps) {
+int run_vsf(const std::string& input, const std::string& output,
+             int roi_x, int roi_y, int roi_w, int roi_h, double sample_fps) {
     if (input.empty()) {
         std::cerr << "vsf: 缺少输入视频\n";
         return 1;
     }
-    auto segs = ops::run_vsf(input, sample_fps);
+    auto segs = ops::run_vsf(input, roi_x, roi_y, roi_w, roi_h, sample_fps);
     if (segs.empty()) {
         std::cout << "vsf: 未检测到字幕段\n";
         return 0;

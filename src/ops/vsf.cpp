@@ -135,15 +135,11 @@ double fraction_nonzero(const std::vector<unsigned char>& b) {
     return static_cast<double>(c) / b.size();
 }
 
-// 默认 ROI：底部 75%~95%
-void default_roi(int w, int h, int& rx, int& ry, int& rw, int& rh) {
-    rx = 0; ry = static_cast<int>(h * 0.75);
-    rw = w; rh = static_cast<int>(h * 0.95) - ry;
-}
-
 } // namespace
 
-std::vector<VsfSegment> run_vsf(const std::string& video_path, double sample_fps) {
+std::vector<VsfSegment> run_vsf(const std::string& video_path,
+                                 int roi_x, int roi_y, int roi_w, int roi_h,
+                                 double sample_fps) {
     std::vector<VsfSegment> out;
 
     // 1. ffprobe 取分辨率
@@ -161,7 +157,18 @@ std::vector<VsfSegment> run_vsf(const std::string& video_path, double sample_fps
         spdlog::error("vsf: 无法解析视频分辨率");
         return out;
     }
-    spdlog::info("vsf: {}x{} 采样 {} fps", W, H, sample_fps);
+
+    // ROI 边界夹紧
+    const int rx = std::max(0, roi_x);
+    const int ry = std::max(0, roi_y);
+    const int rw = std::min(roi_w, W - rx);
+    const int rh = std::min(roi_h, H - ry);
+    if (rw <= 0 || rh <= 0) {
+        spdlog::error("vsf: ROI 越界（视频 {}x{}，请求 {},{},{},{}）",
+                      W, H, roi_x, roi_y, roi_w, roi_h);
+        return out;
+    }
+    spdlog::info("vsf: {}x{} ROI={},{},{},{} 采样 {} fps", W, H, rx, ry, rw, rh, sample_fps);
 
     // 2. 启动 ffmpeg 抽帧
     infra::StreamProcess proc;
@@ -172,9 +179,6 @@ std::vector<VsfSegment> run_vsf(const std::string& video_path, double sample_fps
         spdlog::error("vsf: 无法启动 ffmpeg");
         return out;
     }
-
-    int rx, ry, rw, rh;
-    default_roi(W, H, rx, ry, rw, rh);
 
     const std::size_t frame_bytes = static_cast<std::size_t>(W) * H * 3;
     std::vector<unsigned char> frame(frame_bytes);
