@@ -5,7 +5,11 @@
 namespace iris::controller {
 
 /// 版本号（Model/IR generator.version 与 --version 共用）。
-inline constexpr const char* kVersion = "0.1.0";
+/// CI 通过 IRIS_BUILD_NUMBER 注入构建号（release tag = v{run_number}）；本地默认 0.1.0。
+#ifndef IRIS_VERSION_STRING
+#define IRIS_VERSION_STRING "0.1.0"
+#endif
+inline constexpr const char* kVersion = IRIS_VERSION_STRING;
 
 // MVC Controller 层：每个子命令一个处理器，负责编排 Model 与 Service（ops），
 // 并把结果交给 View（渲染/控制台）。返回进程退出码（0 成功，非 0 失败）。

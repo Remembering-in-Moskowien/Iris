@@ -16,6 +16,16 @@ endif()
 
 option(IRIS_BUILD_TESTS "Build the test suite" ON)
 
+# 构建号：CI 注入 GitHub run number；release tag = v{run_number}，--version 同步显示。
+set(IRIS_BUILD_NUMBER "" CACHE STRING "Build number appended to version (CI run number)")
+if(IRIS_BUILD_NUMBER)
+  set(IRIS_VERSION_STRING "0.1.${IRIS_BUILD_NUMBER}")
+else()
+  set(IRIS_VERSION_STRING "0.1.0")
+endif()
+add_compile_definitions(IRIS_VERSION_STRING="${IRIS_VERSION_STRING}")
+message(STATUS "Iris: version ${IRIS_VERSION_STRING}")
+
 include(cmake/dependencies.cmake)
 
 # ---------------------------------------------------------------------------
