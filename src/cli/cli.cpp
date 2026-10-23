@@ -59,6 +59,30 @@ int run(int argc, char** argv) {
     vsf->add_option("--fps", vsf_fps, "Frame sample rate (default 0.5 = one frame per 2s)")
         ->check(CLI::Range(0.1, 10.0));
 
+    // ---- tts ----
+    auto* tts = app.add_subcommand("tts", "Text-to-speech (IndexTTS ONNX voice cloning)");
+    std::string tts_engine = "indextts", tts_model, tts_text, tts_ref, tts_out;
+    tts->add_option("--engine", tts_engine, "TTS engine (default indextts)");
+    tts->add_option("--model,-m", tts_model, "Model dir (IndexTTS ONNX weights)")->required();
+    tts->add_option("--text", tts_text, "Text to synthesize")->required();
+    tts->add_option("--ref", tts_ref, "Reference WAV for voice cloning (<=15s)")->required();
+    tts->add_option("--out,-o", tts_out, "Output WAV path");
+
+    // ---- emotion ----
+    auto* emo = app.add_subcommand("emotion", "Speech emotion analysis (A/D/V, Wav2Small ONNX)");
+    std::string emo_onnx, emo_wav;
+    emo->add_option("--model", emo_onnx, "Wav2Small ONNX path")->required();
+    emo->add_option("input", emo_wav, "Input 16kHz WAV")->required();
+
+    // ---- dub ----
+    auto* dub = app.add_subcommand("dub", "Dub pipeline: asr -> emotion -> tts");
+    std::string dub_input, dub_model, dub_emo_onnx, dub_ref, dub_out;
+    dub->add_option("input", dub_input, "Input audio/video");
+    dub->add_option("--model,-m", dub_model, "TTS model dir")->required();
+    dub->add_option("--emotion-model", dub_emo_onnx, "Emotion ONNX path (optional)");
+    dub->add_option("--ref", dub_ref, "Reference WAV for voice cloning");
+    dub->add_option("--out,-o", dub_out, "Output dub WAV");
+
     // ---- init ----
     app.add_subcommand("init", "Interactive setup (stub, planned)");
 
@@ -79,6 +103,9 @@ int run(int argc, char** argv) {
         }
         return controller::run_vsf(vsf_input, vsf_output, rx, ry, rw, rh, vsf_fps);
     }
+    if (tts->parsed()) return controller::run_tts(tts_engine, tts_model, tts_text, tts_ref, tts_out);
+    if (emo->parsed()) return controller::run_emotion(emo_onnx, emo_wav);
+    if (dub->parsed()) return controller::run_dub(dub_input, dub_model, dub_emo_onnx, dub_ref, dub_out);
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << "init: 交互式设置将在后续版本实现\n";

@@ -34,4 +34,17 @@ int run_models_list();
 int run_vsf(const std::string& input, const std::string& output,
              int roi_x, int roi_y, int roi_w, int roi_h, double sample_fps);
 
+/// tts：文本 → 语音（IndexTTS ONNX 引擎，音色克隆）。
+int run_tts(const std::string& engine, const std::string& model_dir,
+            const std::string& text, const std::string& ref_wav,
+            const std::string& out_wav);
+
+/// emotion：语音情感分析（A/D/V 三维，Wav2Small ONNX）。
+int run_emotion(const std::string& onnx_path, const std::string& wav_path);
+
+/// dub：配音线路串联（asr → emotion → tts）。
+int run_dub(const std::string& input, const std::string& model_dir,
+            const std::string& onnx_emotion, const std::string& ref_wav,
+            const std::string& out_wav);
+
 } // namespace iris::controller
