@@ -55,7 +55,9 @@ add_library(iris_core
     src/view/subtitle_renderer.cpp
     src/infra/process.cpp
     src/infra/pipe_reader.cpp
-    src/ops/vsf.cpp)
+    src/ops/vsf.cpp
+    src/tts/indextts.cpp
+    src/emotion/emotion.cpp)
 target_include_directories(iris_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(iris_core PRIVATE
@@ -92,7 +94,10 @@ add_executable(iris
     src/controller/validate_command.cpp
     src/controller/doctor_command.cpp
     src/controller/models_command.cpp
-    src/controller/vsf_command.cpp)
+    src/controller/vsf_command.cpp
+    src/controller/tts_command.cpp
+    src/controller/emotion_command.cpp
+    src/controller/dub_command.cpp)
 target_link_libraries(iris PRIVATE iris_core CLI11::CLI11)
 target_compile_options(iris PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 set_target_properties(iris PROPERTIES
