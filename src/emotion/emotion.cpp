@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
 
 #if IRIS_HAS_ONNX
@@ -103,7 +104,8 @@ bool analyze_emotion(const std::string& onnx_path,
     try {
         session = std::make_unique<Ort::Session>(env, wpath.c_str(), so_opts);
     } catch (const Ort::Exception& e) {
-        error = std::string("ONNX 加载失败：") + e.what();
+        error = i18n::tr("ONNX model load failed", "ONNX 模型加载失败");
+        spdlog::debug("emotion ONNX exception: {}", e.what());
         return false;
     }
 

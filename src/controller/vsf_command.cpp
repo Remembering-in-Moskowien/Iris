@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 
+#include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
 #include "iris/ops/vsf.hpp"
 
@@ -28,12 +29,12 @@ std::string srt_timestamp(double sec) {
 int run_vsf(const std::string& input, const std::string& output,
              int roi_x, int roi_y, int roi_w, int roi_h, double sample_fps) {
     if (input.empty()) {
-        std::cerr << "vsf: 缺少输入视频\n";
+        std::cerr << _("vsf: missing input video\n", "vsf: 缺少输入视频\n");
         return 1;
     }
     auto segs = ops::run_vsf(input, roi_x, roi_y, roi_w, roi_h, sample_fps);
     if (segs.empty()) {
-        std::cout << "vsf: 未检测到字幕段\n";
+        std::cout << _("vsf: no subtitle segments detected\n", "vsf: 未检测到字幕段\n");
         return 0;
     }
 
@@ -47,7 +48,7 @@ int run_vsf(const std::string& input, const std::string& output,
 
     std::ofstream ofs(out);
     if (!ofs) {
-        std::cerr << "vsf: 无法写入 " << out << "\n";
+        std::cerr << _("vsf: cannot write ", "vsf: 无法写入 ") << out << "\n";
         return 1;
     }
     for (std::size_t i = 0; i < segs.size(); ++i) {
@@ -59,7 +60,7 @@ int run_vsf(const std::string& input, const std::string& output,
             << " conf=" << std::fixed << std::setprecision(2) << segs[i].confidence
             << " -->\n\n";
     }
-    std::cout << "vsf: 写出 " << segs.size() << " 段 -> " << out << '\n';
+    std::cout << _("vsf: wrote ", "vsf: 写出 ") << segs.size() << _(" segments -> ", " 段 -> ") << out << '\n';
     return 0;
 }
 

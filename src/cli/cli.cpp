@@ -4,6 +4,8 @@
 #include <iostream>
 #include <string>
 
+#include "iris/infra/i18n.hpp"
+
 #include <CLI/CLI.hpp>
 
 #include "iris/controller/commands.hpp"
@@ -98,7 +100,7 @@ int run(int argc, char** argv) {
     if (vsf->parsed()) {
         int rx=0, ry=0, rw=0, rh=0;
         if (std::sscanf(vsf_roi_str.c_str(), "%d,%d,%d,%d", &rx, &ry, &rw, &rh) != 4) {
-            std::cerr << "--roi 格式应为 x,y,w,h（像素）\n";
+            std::cerr << _("--roi format: x,y,w,h (pixels)\n", "--roi 格式应为 x,y,w,h（像素）\n");
             return 1;
         }
         return controller::run_vsf(vsf_input, vsf_output, rx, ry, rw, rh, vsf_fps);
@@ -108,7 +110,7 @@ int run(int argc, char** argv) {
     if (dub->parsed()) return controller::run_dub(dub_input, dub_model, dub_emo_onnx, dub_ref, dub_out);
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
-        std::cout << "init: 交互式设置将在后续版本实现\n";
+        std::cout << _("init: interactive setup coming soon\n", "init: 交互式设置将在后续版本实现\n");
         return 0;
     }
 

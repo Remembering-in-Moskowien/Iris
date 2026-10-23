@@ -4,6 +4,7 @@
 #include <string>
 
 #include "iris/core/provider.hpp"
+#include "iris/infra/i18n.hpp"
 
 namespace iris::controller {
 
@@ -15,7 +16,7 @@ int run_models_list() {
     registry.register_provider({"demucs", "vocal-separation", "local", {core::Capability::VocalSeparation}});
     registry.register_provider({"qwen3-tts", "tts", "local", {core::Capability::Tts}});
 
-    std::cout << "已注册提供者:\n";
+    std::cout << _("Registered providers:\n", "已注册提供者:\n");
     for (const auto& p : registry.all()) {
         std::cout << "  " << p.name << " [" << p.domain << ", " << p.kind << "]\n";
     }
