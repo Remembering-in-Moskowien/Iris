@@ -34,16 +34,21 @@ bool asr_backend_available(AsrBackend backend);
 /// 音频统一由 iris 自建 read_wav_16k_mono 读取为 16 kHz 单声道 PCM 后送入推理。
 class AsrEngine : public core::IAsrProvider {
 public:
-    AsrEngine(AsrBackend backend, std::string model_path)
-        : backend_(backend), model_path_(std::move(model_path)) {}
+    /// n_threads：0 = 自动（硬件并发），>0 = 固定线程数。
+    AsrEngine(AsrBackend backend, std::string model_path, int n_threads = 0)
+        : backend_(backend), model_path_(std::move(model_path)), n_threads_(n_threads) {}
 
     [[nodiscard]] std::string name() const override;
     bool transcribe(const std::string& audio_path, const std::string& language,
                     std::vector<model::Sentence>& out, std::string& error) override;
 
+    /// 构造时实际使用的线程数（0 表示由后端决定）。
+    [[nodiscard]] int n_threads() const { return n_threads_; }
+
 private:
     AsrBackend backend_;
     std::string model_path_;
+    int n_threads_ = 0;
 };
 
 } // namespace iris::asr

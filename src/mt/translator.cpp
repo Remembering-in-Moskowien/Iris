@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "iris/infra/log.hpp"
+#include "iris/infra/threads.hpp"
 
 #if IRIS_HAS_CRISPASR
 #include "crispasr.h"
@@ -115,10 +116,7 @@ bool Translator::open(const TranslateOptions& options, std::string& error) {
     opts_.source = normalize_language(opts_.source);
     opts_.target = normalize_language(opts_.target);
 
-    int threads = opts_.n_threads;
-    if (threads <= 0) {
-        threads = static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
-    }
+    const int threads = infra::resolve_threads(opts_.n_threads);
 
     // 后端：默认按 GGUF 自动识别；显式 --engine 时用映射后的名字（opus-mt → marian）。
     char backend[96] = {};

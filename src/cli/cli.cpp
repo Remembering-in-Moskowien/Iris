@@ -33,12 +33,15 @@ int run(int argc, char** argv) {
     std::string asr_speaker_model;
     int asr_speakers = 0;
     int asr_diarize_method = 4;
+    int asr_threads = 0;
     asr->add_flag("--diarize", asr_diarize,
                   "Run speaker diarization after sentence splitting (labels SPEAKER_0..)");
     asr->add_option("--speaker-model", asr_speaker_model,
                     "Speaker embedding GGUF for --diarize (default: ~/.cache/crispasr/wespeaker*.gguf)");
     asr->add_option("--speakers", asr_speakers,
                     "Exact number of speakers for --diarize (0 = auto 1..8)");
+    asr->add_option("--threads", asr_threads, "Inference threads (0 = hardware concurrency)")
+        ->capture_default_str();
     asr->add_option("--diarize-method", asr_diarize_method,
                     "Diarization method (4 = FoxNose/WeSpeaker, 5 = Sortformer, 3 = pyannote)")
         ->capture_default_str();
@@ -172,7 +175,8 @@ int run(int argc, char** argv) {
     // 分发到 MVC Controller 层。
     if (asr->parsed()) {
         if (!asr_diarize) {
-            return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output);
+            return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output,
+                                  nullptr, asr_threads);
         }
         asr::DiarizeOptions diarize;
         diarize.method = asr_diarize_method;
@@ -187,7 +191,8 @@ int run(int argc, char** argv) {
                            "或把 wespeaker*.gguf 放到 ~/.cache/crispasr）\n");
             return 1;
         }
-        return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output, &diarize);
+        return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output, &diarize,
+                              asr_threads);
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);

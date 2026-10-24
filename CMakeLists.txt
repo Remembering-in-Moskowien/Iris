@@ -62,6 +62,7 @@ add_library(iris_core
     src/infra/process.cpp
     src/infra/pipe_reader.cpp
     src/infra/i18n.cpp
+    src/infra/threads.cpp
     src/ops/vsf.cpp
     src/tts/tts.cpp
     src/tts/timestretch.cpp

@@ -9,6 +9,7 @@
 #include "iris/asr/ct2_mel.hpp"
 #include "iris/asr/onnx.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/threads.hpp"
 
 #if IRIS_HAS_CRISPASR
 #include "crispasr.h"
@@ -44,7 +45,8 @@ const char* backend_key(AsrBackend b) {
 #if IRIS_HAS_CRISPASR
 bool transcribe_crispasr(AsrBackend backend, const std::string& model_path,
                          const std::string& audio_path, const std::string& language,
-                         std::vector<model::Sentence>& out, std::string& error) {
+                         std::vector<model::Sentence>& out, std::string& error,
+                         int n_threads_override) {
     // 进程内读取 16 kHz 单声道 PCM（与 CT2 后端共用 read_wav_16k_mono），
     // 不再依赖 CrispASR 的音频解码（crisp_audio / ogg / opus 等）。
     std::vector<float> samples;
@@ -53,8 +55,8 @@ bool transcribe_crispasr(AsrBackend backend, const std::string& model_path,
         return false;
     }
 
-    const int n_threads =
-        static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+    const int n_threads = infra::resolve_threads(n_threads_override);
+    spdlog::info("crispasr: 线程数 {}", n_threads);
     const char* crisp_backend = (backend == AsrBackend::Qwen3AsrGgml) ? "qwen3" : "whisper";
     crispasr_session* session =
         crispasr_session_open_explicit(model_path.c_str(), crisp_backend, n_threads);
@@ -100,7 +102,8 @@ bool transcribe_crispasr(AsrBackend backend, const std::string& model_path,
 #else
 bool transcribe_crispasr(AsrBackend /*backend*/, const std::string& /*model_path*/,
                          const std::string& /*audio_path*/, const std::string& /*language*/,
-                         std::vector<model::Sentence>& /*out*/, std::string& error) {
+                         std::vector<model::Sentence>& /*out*/, std::string& error,
+                         int /*n_threads_override*/) {
     error = "crispasr: 运行时 DLL 未就绪（tools/runtimes/crispasr 缺失，先放入打包好的 crispasr.dll）";
     return false;
 }
@@ -321,7 +324,7 @@ bool AsrEngine::transcribe(const std::string& audio_path, const std::string& lan
     switch (backend_) {
         case AsrBackend::WhisperGgml:
         case AsrBackend::Qwen3AsrGgml:
-            return transcribe_crispasr(backend_, model_path_, audio_path, language, out, error);
+            return transcribe_crispasr(backend_, model_path_, audio_path, language, out, error, n_threads_);
         case AsrBackend::WhisperCt2:
             return transcribe_ct2(model_path_, audio_path, language, out, error);
         case AsrBackend::WhisperOnnx:

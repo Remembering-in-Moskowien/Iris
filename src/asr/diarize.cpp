@@ -9,6 +9,7 @@
 
 #include "iris/asr/ct2_mel.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/threads.hpp"
 
 #if IRIS_HAS_CRISPASR
 #include "crispasr.h"
@@ -178,9 +179,7 @@ bool diarize_sentences(const std::string& wav16k_path, const DiarizeOptions& opt
 
     crispasr_diarize_opts_abi opts{};
     opts.method = options.method;
-    opts.n_threads = options.n_threads > 0
-                         ? options.n_threads
-                         : static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+    opts.n_threads = infra::resolve_threads(options.n_threads);
     opts.slice_t0_cs = 0;
     opts.pyannote_model_path = (options.method == 3 || options.method == 5) && !options.model.empty()
                                    ? options.model.c_str()

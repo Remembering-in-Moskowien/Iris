@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "iris/infra/process.hpp"
+#include "iris/infra/threads.hpp"
 #include "iris/tts/timestretch.hpp"
 #include <spdlog/fmt/fmt.h>
 
@@ -75,10 +76,7 @@ bool tts_engine_available(TtsEngine engine) {
 }
 
 // 供各引擎实现复用的线程数解析。
-int resolve_tts_threads(int requested) {
-    if (requested > 0) return requested;
-    return static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
-}
+int resolve_tts_threads(int requested) { return infra::resolve_threads(requested); }
 
 // ---------------------------------------------------------------------------
 // 分发
