@@ -70,6 +70,14 @@ int run_tts_inspect(const std::string& model_path) {
             case tts::gguf::ValueType::Array:
                 std::cout << "<array of " << static_cast<int>(v.array_type) << ", len "
                           << v.array_len << ">";
+                if (!v.ints.empty()) {
+                    std::cout << " = [";
+                    for (std::size_t i = 0; i < v.ints.size(); ++i) {
+                        if (i) std::cout << ", ";
+                        std::cout << v.ints[i];
+                    }
+                    std::cout << "]";
+                }
                 break;
             default: std::cout << v.as_int; break;
         }
