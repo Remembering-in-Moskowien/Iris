@@ -429,3 +429,27 @@ $ iris --json asr in.mp4 -l zh -o out.iris.json
   "files": [{ "name": "q.html", "bytes": 4094 }]
 }
 ```
+
+## 构建与发布
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release
+```
+
+GitHub Actions：
+
+| 工作流 | 触发 | 内容 |
+|---|---|---|
+| `CI` | push / PR | Windows + Linux + macOS 三平台构建 + 测试 |
+| `Release` | push `master` / 手动 | 同上构建并打包，发布 `v{run_number}`（版本号 = 提交号） |
+
+`iris --version` 输出 `0.1.{run_number}`；发布资产：
+
+- `iris-{n}-win-x64.zip`（iris.exe + 运行时 DLL，若 `runtime-bootstrap` 可用）
+- `iris-{n}-linux-x64.tar.gz` / `iris-{n}-macos-arm64.tar.gz`（核心二进制，不带运行时）
+
+模型不随包发布，解压后执行 `iris models install --all`。
+
+交接说明见 [docs/HANDOFF.md](docs/HANDOFF.md)。

@@ -4,22 +4,27 @@ on:
   push:
     branches: [master, main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-14]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install tools (Linux)
+      - name: Install deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build g++
+          sudo apt-get install -y ninja-build g++ ffmpeg
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja ffmpeg || true
 
       - name: Activate MSVC (Windows)
         if: runner.os == 'Windows'
@@ -28,7 +33,7 @@ jobs:
           arch: x64
 
       - name: Configure
-        run: cmake -S . -B build -DIRIS_BUILD_TESTS=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DIRIS_BUILD_TESTS=ON
 
       - name: Build
         run: cmake --build build --config Release --parallel

@@ -1,8 +1,8 @@
 name: Release
 
-# 自动发布：push master 或手动触发即构建 Windows 便携包并发布到 GitHub Releases。
-# 版本号 = GitHub 运行号（构建号）：tag = v{run_number}，iris --version = 0.1.{run_number}。
-# 运行时 DLL（crispasr/ctranslate2/onnxruntime）不在仓库内，从 runtime-bootstrap release 拉取后与 iris.exe 打包。
+# 自动发布：push master 或手动触发。
+# 版本号 = GitHub 运行号（构建号）：tag = v{run_number}，`iris --version` = 0.1.{run_number}。
+# 三个平台各自构建并打包，最后统一挂到同一个 Release。
 
 on:
   push:
@@ -12,47 +12,137 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release-windows:
-    runs-on: windows-latest
+  build:
+    name: build (${{ matrix.asset }})
+    runs-on: ${{ matrix.os }}
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # CMake 用它生成 IRIS_VERSION_STRING = 0.1.{run_number}
+      BUILD_NUMBER: ${{ github.run_number }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset: win-x64
+          - os: ubuntu-latest
+            asset: linux-x64
+          - os: macos-14
+            asset: macos-arm64
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Activate MSVC
+      # ---------------- 依赖 ----------------
+      - name: Install deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++ ffmpeg
+
+      - name: Install deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja ffmpeg || true
+
+      - name: Activate MSVC (Windows)
+        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
 
+      # ---------------- 构建 ----------------
       - name: Configure
-        run: cmake -S . -B build -DIRIS_BUILD_TESTS=OFF -DIRIS_BUILD_NUMBER=${{ github.run_number }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DIRIS_BUILD_TESTS=ON -DIRIS_BUILD_NUMBER=${{ env.BUILD_NUMBER }}
 
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Assemble portable dist
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # ---------------- 打包 ----------------
+      - name: Stage (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
-          gh release download runtime-bootstrap `
-            --repo ${{ github.repository }} `
-            --pattern "iris-runtime-win-x64.zip" `
-            --dir dist
-          Expand-Archive -Path "dist/iris-runtime-win-x64.zip" -DestinationPath dist -Force
-          Remove-Item "dist/iris-runtime-win-x64.zip"
-          Copy-Item "build/bin/Release/iris.exe" "dist/"
-          Get-ChildItem dist | ForEach-Object { Write-Host $_.Name }
+          $exe = Get-ChildItem -Path build -Recurse -Filter iris.exe | Select-Object -First 1
+          Copy-Item $exe.FullName "dist/iris.exe"
+          # 运行时 DLL（crispasr/ctranslate2/onnxruntime）不在仓库里，
+          # 从 runtime-bootstrap 预发布包拉取；拿不到就打「仅核心」包并标注。
+          $withRuntimes = "false"
+          try {
+            gh release download runtime-bootstrap --repo ${{ github.repository }} `
+              --pattern "iris-runtime-win-x64.zip" --dir dist --clobber
+            Expand-Archive -Path "dist/iris-runtime-win-x64.zip" -DestinationPath dist -Force
+            Remove-Item "dist/iris-runtime-win-x64.zip"
+            $withRuntimes = "true"
+          } catch {
+            Write-Warning "runtime-bootstrap 不可用：本次仅打包核心（无 ASR/TTS 运行时后端）"
+          }
+          "IRIS_WITH_RUNTIMES=$withRuntimes" | Out-File -Append $env:GITHUB_ENV
+          Copy-Item README.md "dist/" -ErrorAction SilentlyContinue
+          Compress-Archive -Path "dist/*" -DestinationPath "iris-${{ env.BUILD_NUMBER }}-win-x64.zip"
 
-      - name: Package zip
-        shell: pwsh
-        run: Compress-Archive -Path "dist/*" -DestinationPath "iris-${{ github.run_number }}-win-x64.zip"
-
-      - name: Publish release
-        shell: pwsh
+      - name: Stage (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          gh release create "v${{ github.run_number }}" `
-            --repo ${{ github.repository }} `
-            --title "v${{ github.run_number }}" `
-            --notes "Automated release (build ${{ github.run_number }}). Portable Windows x64 build: iris.exe bundled with crispasr/ctranslate2/onnxruntime runtime DLLs. Requires ffmpeg on PATH for media conversion." `
-            "iris-${{ github.run_number }}-win-x64.zip"
+          set -e
+          mkdir -p dist
+          cp "$(find build -name iris -type f | head -n1)" dist/iris
+          chmod +x dist/iris
+          cp README.md dist/ 2>/dev/null || true
+          tar -czf "iris-${BUILD_NUMBER}-${{ matrix.asset }}.tar.gz" -C dist .
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.asset }}
+          path: |
+            iris-${{ env.BUILD_NUMBER }}-*.zip
+            iris-${BUILD_NUMBER}-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: publish v${{ github.run_number }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -lh packages
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          set -e
+          assets=$(find packages -type f | sort | tr '\n' ' ')
+          cat > notes.md <<EOF
+          Automated release (build ${BUILD_NUMBER}, commit ${{ github.sha }}).
+
+          | asset | contents |
+          |---|---|
+          | iris-${BUILD_NUMBER}-win-x64.zip | iris.exe + CrispASR/CTranslate2/onnxruntime DLL（runtime-bootstrap 可用时）|
+          | iris-${BUILD_NUMBER}-linux-x64.tar.gz | 核心二进制（不带推理运行时）|
+          | iris-${BUILD_NUMBER}-macos-arm64.tar.gz | 核心二进制（不带推理运行时）|
+
+          - Requires \`ffmpeg\` on PATH for media conversion.
+          - Models are not bundled: run \`iris models install --all\` after extraction.
+          - Binaries are unsigned; on macOS run \`xattr -dr com.apple.quarantine iris\`.
+          - Config and models default to \`<install drive>:/iris\` (IRIS_HOME overrides).
+          EOF
+          gh release create "v${BUILD_NUMBER}" $assets \
+            --repo "${{ github.repository }}" \
+            --title "v${BUILD_NUMBER}" \
+            --notes-file notes.md
