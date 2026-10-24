@@ -46,6 +46,8 @@ int run(int argc, char** argv) {
     int asr_speakers = 0;
     int asr_diarize_method = 4;
     int asr_threads = 0;
+    std::string asr_split = "rule";
+    std::string asr_split_model = "models/sat";
     bool asr_punc = false;
     std::string asr_punc_model = "auto";
     bool asr_separate = false;
@@ -57,6 +59,9 @@ int run(int argc, char** argv) {
                     "Speaker embedding GGUF for --diarize (default: ~/.cache/crispasr/wespeaker*.gguf)");
     asr->add_option("--speakers", asr_speakers,
                     "Exact number of speakers for --diarize (0 = auto 1..8)");
+    asr->add_option("--split", asr_split, "Sentence split strategy: rule | sat")->capture_default_str();
+    asr->add_option("--split-model", asr_split_model, "SaT model dir (tokenizer.json + model.onnx)")
+        ->capture_default_str();
     asr->add_flag("--punc", asr_punc, "Restore punctuation on the transcript (FireRedPunc/PCS)");
     asr->add_option("--punc-model", asr_punc_model,
                     "Punctuation model: alias (auto|firered|fullstop|punctuate-all|pcs) or .gguf")
@@ -246,7 +251,8 @@ int run(int argc, char** argv) {
         if (!asr_diarize) {
             return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output,
                                       nullptr, asr_threads, separate_ptr,
-                                      asr_punc ? resolve_punc_model(asr_punc_model) : std::string());
+                                      asr_punc ? resolve_punc_model(asr_punc_model) : std::string(),
+                                      asr_split, asr_split_model);
         }
         asr::DiarizeOptions diarize;
         diarize.method = asr_diarize_method;
@@ -276,7 +282,8 @@ int run(int argc, char** argv) {
         }
         return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output, &diarize,
                                    asr_threads, separate_ptr,
-                                   asr_punc ? resolve_punc_model(asr_punc_model) : std::string());
+                                   asr_punc ? resolve_punc_model(asr_punc_model) : std::string(),
+                                   asr_split, asr_split_model);
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);

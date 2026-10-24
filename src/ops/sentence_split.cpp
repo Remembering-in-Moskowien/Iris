@@ -1,6 +1,7 @@
 #include "iris/ops/sentence_split.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,14 @@ namespace iris::ops {
 
 // 简易 rule 策略：按标点切分长句（对应 C# SentenceSplitStrategy.Rule）。
 namespace {
+
+/// 去首尾空白。
+std::string trim_copy(const std::string& s) {
+    std::size_t b = 0, e = s.size();
+    while (b < e && std::isspace(static_cast<unsigned char>(s[b]))) ++b;
+    while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1]))) --e;
+    return s.substr(b, e - b);
+}
 
 // 常见句末标点（含 UTF-8 中文标点）。
 const std::vector<std::string> kBoundaryMarks = {"。", "！", "？", ".", "!", "?"};
@@ -66,7 +75,36 @@ bool SentenceSplit::execute(core::PipelineContext& ctx) {
         out.reserve(track.sentences.size() * 2);
         for (const auto& s : track.sentences) {
             if (s.text.empty()) continue;
-            const auto parts = split_text(s.text, max_len);
+            auto parts = split_text(s.text, max_len);
+            // SaT 策略：先让模型按语义切，再对超长片段套用长度硬切兜底。
+            if (sat_ && sat_->ready()) {
+                std::vector<std::size_t> points;
+                std::string sat_error;
+                if (sat_->split_points(s.text, 0.5f, points, sat_error)) {
+                    if (!points.empty()) {
+                        std::vector<std::string> sat_parts;
+                        std::size_t pos = 0;
+                        for (const auto at : points) {
+                            if (at <= pos || at >= s.text.size()) continue;
+                            const std::string piece = trim_copy(s.text.substr(pos, at - pos));
+                            if (!piece.empty()) sat_parts.push_back(piece);
+                            pos = at;
+                        }
+                        const std::string tail = trim_copy(s.text.substr(pos));
+                        if (!tail.empty()) sat_parts.push_back(tail);
+                        if (sat_parts.size() > 1) {
+                            std::vector<std::string> capped;
+                            for (const auto& piece : sat_parts) {
+                                const auto sub = split_text(piece, max_len);
+                                capped.insert(capped.end(), sub.begin(), sub.end());
+                            }
+                            parts = std::move(capped);
+                        }
+                    }
+                } else {
+                    spdlog::warn("sentence_split: SaT 失败（{}），退回标点/长度策略", sat_error);
+                }
+            }
             if (parts.size() <= 1) {
                 out.push_back(s);
                 continue;

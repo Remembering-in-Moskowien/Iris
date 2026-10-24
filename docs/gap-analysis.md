@@ -29,7 +29,7 @@ C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命�
 | 音频预处理 | `AudioPreprocessOperator` | `ops/audio_preprocess.cpp` | ✅ |
 | 转写（本地） | `CrispAsrWhisperStrategy` / `CrispAsrQwenStrategy` / `WhisperCppStrategy` | `asr/asr.cpp`（crispasr whisper/qwen3 + CT2） | ✅ |
 | 转写（云） | `Asr/CloudAsrProvider.cs`、`ProviderChain` | 无 | ❌ |
-| 分句 | `PassiveRuleSplit` / `AggressiveRuleSplit` / `LLMSplit` / `SaTSplit` + `XlmRBpeTokenizer` | 仅 rule 一种（`ops/sentence_split.cpp`） | 🟡 |
+| 分句 | `PassiveRuleSplit` / `AggressiveRuleSplit` / `LLMSplit` / `SaTSplit` + `XlmRBpeTokenizer` | ✅ rule + **sat**（`asr --split sat`：XLM-R SentencePiece 分词 + SaT ONNX，512/256 滑窗，失败退回 rule）；LLM 策略未做 | 🟡 |
 | **说话人分割** | `DiarizationOperator`、`SpeakerProfilingOperator`、`PolyVoiceDiarizationStrategy`、`WeSpeakerDiarizationStrategy`、`DiarizationAudioPreprocessor` | ✅ `ops/diarize.cpp`（`asr --diarize`）：细网格 + 静音过滤 + 库推导 turns，写 `Sentence/Word.speaker` | ✅（P0 已接） |
 | **人声分离** | `VocalSeparationOperator`、`HtDemucsOnnxEngine`、`DemucsVocalSeparationProvider` | ✅ `ops/vocal_separate.cpp`（`asr --separate`，HTDemucs，写 `state.vocalsPath`，预处理自动优先吃人声） | ✅（P0 已接，性能见下） |
 | 翻译（非 LLM） | `OpusMtTranslationStrategy` + 自写 `OpusMtEngine`/`OpusMtTokenizer` | `mt/translator.cpp`（CrispASR marian/m2m100） | ✅ |

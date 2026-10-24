@@ -24,7 +24,8 @@ int run_asr(const std::string& input, const std::string& language, const std::st
             const std::string& model, const std::string& output,
             const asr::DiarizeOptions* diarize = nullptr, int n_threads = 0,
             const asr::SeparateOptions* separate = nullptr,
-            const std::string& punc_model = {});
+            const std::string& punc_model = {},
+            const std::string& split_strategy = "rule", const std::string& split_model = {});
 
 /// build：IR → ASS/SRT/TXT（View 层渲染）。
 int run_build(const std::string& ir_path, const std::string& format, const std::string& output);

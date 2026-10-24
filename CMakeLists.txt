@@ -57,6 +57,7 @@ add_library(iris_core
     src/ops/vocal_separate.cpp
     src/text/punctuate.cpp
     src/text/cleanup.cpp
+    src/text/sat.cpp
     src/subtitle/parser.cpp
     src/subtitle/combine.cpp
     src/asr/asr.cpp

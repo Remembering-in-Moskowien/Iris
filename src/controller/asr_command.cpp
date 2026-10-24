@@ -14,6 +14,7 @@
 #include "iris/ops/diarize.hpp"
 #include "iris/ops/vocal_separate.hpp"
 #include "iris/text/punctuate.hpp"
+#include "iris/text/sat.hpp"
 #include "iris/ops/sentence_split.hpp"
 #include "iris/ops/transcribe.hpp"
 
@@ -24,7 +25,8 @@ namespace fs = std::filesystem;
 int run_asr(const std::string& input, const std::string& language, const std::string& engine,
             const std::string& model, const std::string& output,
             const asr::DiarizeOptions* diarize, int n_threads,
-            const asr::SeparateOptions* separate, const std::string& punc_model) {
+            const asr::SeparateOptions* separate, const std::string& punc_model,
+            const std::string& split_strategy, const std::string& split_model) {
     if (!fs::exists(input)) {
         spdlog::error("asr: 输入文件不存在: {}", input);
         return 1;
@@ -69,6 +71,7 @@ int run_asr(const std::string& input, const std::string& language, const std::st
     doc.config.language = language;
     doc.config.transcriber_engine = engine;
     doc.config.transcriber_model = model;
+    doc.config.split_strategy = split_strategy;
 
     core::PipelineContext ctx;
     ctx.doc = &doc;
@@ -94,7 +97,16 @@ int run_asr(const std::string& input, const std::string& language, const std::st
     }
     pipeline.add(std::make_shared<ops::Transcribe>(
         std::make_shared<asr::AsrEngine>(backend, model, n_threads), punctuator));
-    pipeline.add(std::make_shared<ops::SentenceSplit>());
+    std::shared_ptr<text::SatSegmenter> sat;
+    if (split_strategy == "sat") {
+        sat = std::make_shared<text::SatSegmenter>();
+        std::string sat_error;
+        if (!sat->open(split_model.empty() ? "models/sat" : split_model, sat_error)) {
+            spdlog::warn("{}（退回 rule 策略）", sat_error);
+            sat.reset();
+        }
+    }
+    pipeline.add(std::make_shared<ops::SentenceSplit>(sat));
     if (diarize != nullptr) {
         pipeline.add(std::make_shared<ops::Diarize>(*diarize));
         doc.config.command_name = "asr+diarize";

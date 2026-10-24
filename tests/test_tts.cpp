@@ -13,6 +13,7 @@
 #include "iris/subtitle/combine.hpp"
 #include "iris/subtitle/parser.hpp"
 #include "iris/text/cleanup.hpp"
+#include "iris/text/sat.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/mt/translator.hpp"
 #include "iris/tts/gguf.hpp"
@@ -553,6 +554,45 @@ TEST_CASE("subtitle import: SRT/ASS parsing, dedupe and bilingual alignment", "[
     const std::vector<Cue> far = {{5000, 6000, "y"}};
     iris::subtitle::align_translations(loner, far, 0.1, stats);
     REQUIRE(loner[0].translation.empty());
+}
+
+TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
+    // 边界 → 切分偏移（纯函数，无模型）
+    std::vector<iris::text::SatToken> tokens = {
+        {"\xE2\x96\x81Hello", 1, 0, 5},
+        {"\xE2\x96\x81world", 2, 6, 11},
+        {"\xE2\x96\x81" "again", 3, 12, 17},
+    };
+    std::vector<float> probs = {0.1f, 0.9f, 0.1f};
+    auto points = iris::text::SatSegmenter::boundaries_to_offsets(tokens, probs, 0.5f);
+    REQUIRE(points.size() == 1);
+    REQUIRE(points[0] == 12);
+
+    // 全部低于阈值时不切
+    probs = {0.1f, 0.2f, 0.1f};
+    REQUIRE(iris::text::SatSegmenter::boundaries_to_offsets(tokens, probs, 0.5f).empty());
+
+    // 分词器（需要本机有 XLM-R tokenizer.json，缺失则跳过）
+    const std::string path = "models/sat/tokenizer.json";
+    if (!std::filesystem::exists(path)) {
+        SUCCEED("sat tokenizer not installed, skipping");
+        return;
+    }
+    iris::text::SatTokenizer tokenizer;
+    std::string error;
+    REQUIRE(tokenizer.load(path, error));
+    REQUIRE(tokenizer.vocab_size() > 250000u);
+
+    const auto encoded = tokenizer.encode("Hello world. This is a test.");
+    REQUIRE(!encoded.empty());
+    // 首 token 一定带 metaspace 前缀，且从 0 开始
+    REQUIRE(encoded.front().start == 0);
+    REQUIRE(encoded.front().piece.rfind("\xE2\x96\x81", 0) == 0);
+    for (const auto& t : encoded) {
+        REQUIRE(t.id >= 0);
+        REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
+        REQUIRE(t.end >= t.start);
+    }
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {
