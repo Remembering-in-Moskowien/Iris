@@ -2,6 +2,8 @@
 
 #include <string>
 
+#include "iris/asr/diarize.hpp"
+
 namespace iris::controller {
 
 /// 版本号（Model/IR generator.version 与 --version 共用）。
@@ -15,8 +17,10 @@ inline constexpr const char* kVersion = IRIS_VERSION_STRING;
 // 并把结果交给 View（渲染/控制台）。返回进程退出码（0 成功，非 0 失败）。
 
 /// asr：媒体 → IR（ffmpeg_convert → audio_preprocess → transcribe → sentence_split）。
+/// diarize 非空时，在分句之后追加说话人分割阶段。
 int run_asr(const std::string& input, const std::string& language, const std::string& engine,
-            const std::string& model, const std::string& output);
+            const std::string& model, const std::string& output,
+            const asr::DiarizeOptions* diarize = nullptr);
 
 /// build：IR → ASS/SRT/TXT（View 层渲染）。
 int run_build(const std::string& ir_path, const std::string& format, const std::string& output);

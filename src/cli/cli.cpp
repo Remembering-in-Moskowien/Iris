@@ -29,6 +29,19 @@ int run(int argc, char** argv) {
     asr->add_option("--model,-m", asr_model,
                     "Model path (whisper/qwen3-asr: ggml GGUF; whisper-ct2: CT2 model dir)");
     asr->add_option("--output,-o", asr_output, "Output IR path");
+    bool asr_diarize = false;
+    std::string asr_speaker_model;
+    int asr_speakers = 0;
+    int asr_diarize_method = 4;
+    asr->add_flag("--diarize", asr_diarize,
+                  "Run speaker diarization after sentence splitting (labels SPEAKER_0..)");
+    asr->add_option("--speaker-model", asr_speaker_model,
+                    "Speaker embedding GGUF for --diarize (default: ~/.cache/crispasr/wespeaker*.gguf)");
+    asr->add_option("--speakers", asr_speakers,
+                    "Exact number of speakers for --diarize (0 = auto 1..8)");
+    asr->add_option("--diarize-method", asr_diarize_method,
+                    "Diarization method (4 = FoxNose/WeSpeaker, 5 = Sortformer, 3 = pyannote)")
+        ->capture_default_str();
 
     // ---- build ----
     auto* build = app.add_subcommand("build", "Render an IR file to subtitles");
@@ -157,7 +170,25 @@ int run(int argc, char** argv) {
     infra::init_logger(verbose);
 
     // 分发到 MVC Controller 层。
-    if (asr->parsed()) return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output);
+    if (asr->parsed()) {
+        if (!asr_diarize) {
+            return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output);
+        }
+        asr::DiarizeOptions diarize;
+        diarize.method = asr_diarize_method;
+        diarize.embedder = asr_speaker_model.empty() ? asr::default_embedder_model()
+                                                     : asr_speaker_model;
+        diarize.model = diarize.method == 4 ? std::string() : diarize.embedder;
+        diarize.num_speakers = asr_speakers;
+        if (diarize.method == 4 && diarize.embedder.empty()) {
+            std::cerr << _("asr: --diarize needs a speaker embedding model "
+                           "(--speaker-model, or put wespeaker*.gguf in ~/.cache/crispasr)\n",
+                           "asr: --diarize 需要说话人嵌入模型（--speaker-model，"
+                           "或把 wespeaker*.gguf 放到 ~/.cache/crispasr）\n");
+            return 1;
+        }
+        return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output, &diarize);
+    }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
     if (models->parsed()) return controller::run_models_list();

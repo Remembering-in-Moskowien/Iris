@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "iris/asr/diarize.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/mt/translator.hpp"
 #include "iris/tts/gguf.hpp"
@@ -383,6 +384,24 @@ TEST_CASE("translate: language codes and Chinese output normalisation", "[mt]") 
 
     // 非中文目标语言：只折叠空格，标点保持原样
     REQUIRE(iris::mt::normalize_output("Hello,   world.", "en") == "Hello, world.");
+}
+
+TEST_CASE("diarization: midpoint speaker assignment", "[diarize]") {
+    using iris::asr::SpeakerSpan;
+    using iris::asr::speaker_at;
+
+    const std::vector<SpeakerSpan> spans = {{0, 1000, 0}, {1000, 2000, 1}, {2000, 3000, 0}};
+    REQUIRE(speaker_at(0, spans) == 0);
+    REQUIRE(speaker_at(999, spans) == 0);
+    REQUIRE(speaker_at(1000, spans) == 1);
+    REQUIRE(speaker_at(2999, spans) == 0);
+    REQUIRE(speaker_at(3000, spans) == 0); // 空隙取最近一段
+    REQUIRE(speaker_at(-50, spans) == 0);
+    REQUIRE(speaker_at(500, {}) == -1);
+
+    REQUIRE(iris::asr::speaker_label(0) == "SPEAKER_0");
+    REQUIRE(iris::asr::speaker_label(3) == "SPEAKER_3");
+    REQUIRE(iris::asr::speaker_label(-1) == "SPEAKER_?");
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {

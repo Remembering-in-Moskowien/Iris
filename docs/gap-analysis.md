@@ -30,7 +30,7 @@ C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命�
 | 转写（本地） | `CrispAsrWhisperStrategy` / `CrispAsrQwenStrategy` / `WhisperCppStrategy` | `asr/asr.cpp`（crispasr whisper/qwen3 + CT2） | ✅ |
 | 转写（云） | `Asr/CloudAsrProvider.cs`、`ProviderChain` | 无 | ❌ |
 | 分句 | `PassiveRuleSplit` / `AggressiveRuleSplit` / `LLMSplit` / `SaTSplit` + `XlmRBpeTokenizer` | 仅 rule 一种（`ops/sentence_split.cpp`） | 🟡 |
-| **说话人分割** | `DiarizationOperator`、`SpeakerProfilingOperator`、`PolyVoiceDiarizationStrategy`、`WeSpeakerDiarizationStrategy`、`DiarizationAudioPreprocessor` | **无**（IR 有 `speaker` 字段，没人填） | ❌ |
+| **说话人分割** | `DiarizationOperator`、`SpeakerProfilingOperator`、`PolyVoiceDiarizationStrategy`、`WeSpeakerDiarizationStrategy`、`DiarizationAudioPreprocessor` | ✅ `ops/diarize.cpp`（`asr --diarize`）：细网格 + 静音过滤 + 库推导 turns，写 `Sentence/Word.speaker` | ✅（P0 已接） |
 | **人声分离** | `VocalSeparationOperator`、`HtDemucsOnnxEngine`、`DemucsVocalSeparationProvider` | **无**（`ops/vsf.cpp` 是硬字幕帧检测，不是人声分离） | ❌ |
 | 翻译（非 LLM） | `OpusMtTranslationStrategy` + 自写 `OpusMtEngine`/`OpusMtTokenizer` | `mt/translator.cpp`（CrispASR marian/m2m100） | ✅ |
 | 翻译（LLM） | `LLMTranslationStrategy`、`Llm/OpenAiCompatibleLlmProvider` | 无 | ❌ |
@@ -59,20 +59,20 @@ C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命�
 - 由 `PipelineOperatorFactory.CreateDiarizationOperator` 决定「**启用才装配该阶段**」，
   未启用时管线里根本没有这个算子（所以 C# 也并非默认开启）。
 
-**iris 现状**：`model::Word` / `model::Sentence` 都有 `std::optional<std::string> speaker`，
-但没有任何代码写入它；`Capability::Diarization` 只在枚举里，`models list` 也不列。
+**iris 现状（已接入）**：`asr --diarize` 在分句之后追加 `Diarize` 算子
+（`ops/diarize.cpp` ↔ `asr/diarize.cpp`）：
 
-**能否立刻接**：能。三个前提都已经满足：
+- 网格：把音频切成 1 s 小片（纯静音片不送聚类），交给 `crispasr_diarize_segments_turns_abi`；
+- 取库推导的 **turns**（method 4 = FoxNose：WeSpeaker 嵌入 + 谱聚类），
+  过滤「有声率 < 40%」的片段（交界静音否则会被聚成"另一个人"），
+  再归并 < 500 ms 的碎片、按首次出现重编号 `SPEAKER_0..N`；
+- 每句按**与 turns 的最大重叠**贴 `Sentence.speaker`，词级按词中点贴 `Word.speaker`；
+- 其它轨道（translation）按时间中点共享同一套标签；
+- 模型默认从 `~/.cache/crispasr/wespeaker*.gguf` 找，也可 `--speaker-model` 指定；
+  `--speakers N` 可固定人数，`--diarize-method 5` 可换 Sortformer。
 
-1. 运行时有 API：`crispasr_diarize_segments_abi(left, right, n, is_stereo, segs, n_segs, opts)`
-   （`opts.method`：3 = pyannote 分割 + 嵌入，4 = FoxNose，5 = sortformer；
-   还有 `crispasr_diarize_turns_abi`、`crispasr_session_n_speakers`、`crispasr_session_set_speaker_name`）；
-2. 模型已在本地：`C:\Users\21286\.cache\crispasr\pyannote-seg-3.0.gguf`（5.7 MB）、
-   `wespeaker-resnet34-lm.gguf`（22.8 MB）、`titanet-large.gguf`（42.5 MB）；
-3. IR 字段已就位（`Word.speaker`、`Sentence.speaker`），渲染层无需改动。
-
-需要补的代码：`ops/diarize.cpp`（把 `Transcribe` 的句子时间码转成 `diarize_seg_abi` 网格 →
-按词中点贴 speaker）+ `asr/diarize.cpp`（读 16k PCM 调 ABI）+ 装配到 `asr`/`dub` 管线（可选开关）。
+实测：单人 11 s 素材 → 1 人（两句都是 `SPEAKER_0`）；
+双音色拼接素材（A 两句 + 0.8 s 静音 + B 两句）→ 2 人，标签严格按说话人分段。
 
 ## 4. IR 契约差距
 

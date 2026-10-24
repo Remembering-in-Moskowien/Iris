@@ -11,6 +11,7 @@
 #include "iris/model/ir_document.hpp"
 #include "iris/ops/audio_preprocess.hpp"
 #include "iris/ops/ffmpeg_convert.hpp"
+#include "iris/ops/diarize.hpp"
 #include "iris/ops/sentence_split.hpp"
 #include "iris/ops/transcribe.hpp"
 
@@ -19,7 +20,8 @@ namespace iris::controller {
 namespace fs = std::filesystem;
 
 int run_asr(const std::string& input, const std::string& language, const std::string& engine,
-            const std::string& model, const std::string& output) {
+            const std::string& model, const std::string& output,
+            const asr::DiarizeOptions* diarize) {
     if (!fs::exists(input)) {
         spdlog::error("asr: 输入文件不存在: {}", input);
         return 1;
@@ -78,6 +80,10 @@ int run_asr(const std::string& input, const std::string& language, const std::st
     pipeline.add(std::make_shared<ops::Transcribe>(
         std::make_shared<asr::AsrEngine>(backend, model)));
     pipeline.add(std::make_shared<ops::SentenceSplit>());
+    if (diarize != nullptr) {
+        pipeline.add(std::make_shared<ops::Diarize>(*diarize));
+        doc.config.command_name = "asr+diarize";
+    }
 
     if (!pipeline.run(ctx)) {
         spdlog::error("asr: 管线执行失败");

@@ -53,9 +53,11 @@ add_library(iris_core
     src/ops/sentence_split.cpp
     src/ops/dub_tts.cpp
     src/ops/translate.cpp
+    src/ops/diarize.cpp
     src/asr/asr.cpp
     src/asr/ct2_mel.cpp
     src/asr/onnx.cpp
+    src/asr/diarize.cpp
     src/view/subtitle_renderer.cpp
     src/infra/process.cpp
     src/infra/pipe_reader.cpp
