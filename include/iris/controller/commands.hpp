@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/separate.hpp"
@@ -103,6 +104,14 @@ struct TranslateCommandOptions {
 
 /// translate：机器翻译（非 LLM：OPUS-MT/Marian、M2M100）。
 int run_translate(const TranslateCommandOptions& opts);
+
+/// convert：单个字幕文件（SRT/ASS/VTT）→ IR。
+int run_convert(const std::vector<std::string>& inputs, const std::string& language,
+                const std::string& out_path);
+
+/// combine：多个字幕文件 → IR（同一语言拼接去重；--bilingual 时第二份作为译文对齐）。
+int run_combine(const std::vector<std::string>& inputs, const std::string& language,
+                const std::string& out_path, bool bilingual);
 
 /// correct：IR 文本/时间码校正（空白、标点、空句、反序与重叠时间码）。
 int run_correct(const std::string& ir_path, const std::string& out_path);

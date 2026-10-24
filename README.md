@@ -257,7 +257,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | `dub` | 配音链路：媒体/IR → (asr) → (emotion) → 逐句 TTS → 配音音轨 | ✅ 已迁移 |
 | `vsf` | 视频硬字幕帧定位（自实现，无 OpenCV） | ✅ 已迁移 |
 | `init` | 交互式设置 | 🚧 待迁移 |
-| `convert` / `combine` | 字幕文件 → IR | 🚧 待迁移 |
+| `convert` / `combine` | 字幕文件（SRT/ASS/VTT）→ IR；`combine --bilingual` 做双语对齐 | ✅ 已迁移 |
 | `ocr` / `from-script` | OCR / 剧本导入 | 🚧 待迁移 |
 | `correct` | IR 文本/时间码校正（空白、重复标点、空句、反序与重叠） | ✅ 已迁移 |
 | `translate` | 机器翻译（dub 现已能用译文轨道配音） | 🚧 待迁移 |

@@ -197,6 +197,23 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- convert / combine ----
+    auto* convert = app.add_subcommand("convert", "Import one subtitle file (SRT/ASS/VTT) into an IR");
+    std::vector<std::string> convert_inputs, combine_inputs;
+    std::string convert_out, combine_out, convert_lang = "en", combine_lang = "en";
+    convert->add_option("subtitle", convert_inputs, "Subtitle file (.srt/.ass/.ssa/.vtt)")->required();
+    convert->add_option("--out,-o", convert_out, "Output IR path");
+    convert->add_option("--language,-l", convert_lang, "Language code")->capture_default_str();
+
+    auto* combine = app.add_subcommand("combine", "Merge several subtitle files into one IR");
+    combine->add_option("subtitles", combine_inputs, "Subtitle files (first = primary)")
+        ->required();
+    combine->add_option("--out,-o", combine_out, "Output IR path");
+    combine->add_option("--language,-l", combine_lang, "Language code")->capture_default_str();
+    bool combine_bilingual = false;
+    combine->add_flag("--bilingual", combine_bilingual,
+                      "Treat the second file as the translation of the first");
+
     // ---- correct ----
     auto* correct = app.add_subcommand(
         "correct", "Clean up an IR: whitespace, punctuation, empty cues, timings/overlaps");
@@ -283,6 +300,9 @@ int run(int argc, char** argv) {
     }
     if (translate->parsed()) return controller::run_translate(translate_opts);
     if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (convert->parsed()) return controller::run_convert(convert_inputs, convert_lang, convert_out);
+    if (combine->parsed())
+        return controller::run_combine(combine_inputs, combine_lang, combine_out, combine_bilingual);
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << _("init: interactive setup coming soon\n", "init: 交互式设置将在后续版本实现\n");

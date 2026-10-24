@@ -10,6 +10,8 @@
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/ops/sentence_split.hpp"
+#include "iris/subtitle/combine.hpp"
+#include "iris/subtitle/parser.hpp"
 #include "iris/text/cleanup.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/mt/translator.hpp"
@@ -506,6 +508,51 @@ TEST_CASE("correction: text cleanup and timing repair", "[correct]") {
     REQUIRE(report.dropped == 1);
     REQUIRE(report.timing_fixed == 1);
     REQUIRE(report.overlap_fixed == 1);
+}
+
+TEST_CASE("subtitle import: SRT/ASS parsing, dedupe and bilingual alignment", "[subtitle]") {
+    using iris::subtitle::Cue;
+
+    std::string error;
+    std::vector<Cue> cues;
+    const std::string srt =
+        "1\n00:00:00,000 --> 00:00:02,500\nHello\n\n"
+        "2\n00:00:02,500 --> 00:00:05,000\nWorld\nline two\n";
+    REQUIRE(iris::subtitle::parse_srt(srt, cues, error));
+    REQUIRE(cues.size() == 2);
+    REQUIRE(cues[0].start_ms == 0);
+    REQUIRE(cues[0].end_ms == 2500);
+    REQUIRE(cues[0].text == "Hello");
+    REQUIRE(cues[1].text == "World line two");
+
+    const std::string ass =
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        "Dialogue: 0,0:00:00.00,0:00:02.50,Default,,0,0,0,,{\\b1}你好，世界\n";
+    std::vector<Cue> acues;
+    REQUIRE(iris::subtitle::parse_ass(ass, acues, error));
+    REQUIRE(acues.size() == 1);
+    REQUIRE(acues[0].end_ms == 2500);
+    REQUIRE(acues[0].text == "你好，世界"); // 覆盖标签已剥掉
+
+    // 去重：时间相近且文本相同只留一条
+    std::vector<Cue> dup = {{0, 1000, "a"}, {0, 1000, "a"}, {1000, 2000, "b"}};
+    iris::subtitle::CombineStats stats;
+    REQUIRE(iris::subtitle::merge_cues(dup, 500, stats, error));
+    REQUIRE(dup.size() == 2);
+    REQUIRE(stats.duplicates == 1);
+
+    // 双语对齐：按最大时间重叠配对
+    std::vector<Cue> primary = {{0, 2000, "hello"}};
+    const std::vector<Cue> second = {{0, 1900, "你好"}};
+    iris::subtitle::align_translations(primary, second, 0.1, stats);
+    REQUIRE(primary[0].translation == "你好");
+
+    // 重叠过少则不对齐
+    std::vector<Cue> loner = {{0, 1000, "x"}};
+    const std::vector<Cue> far = {{5000, 6000, "y"}};
+    iris::subtitle::align_translations(loner, far, 0.1, stats);
+    REQUIRE(loner[0].translation.empty());
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {
