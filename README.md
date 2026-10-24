@@ -263,7 +263,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | `quality` | 字幕质量报告（CPS/重叠/空白/重复/说话人，输出自包含 HTML；有 error 时 exit 2） | ✅ 已迁移 |
 | `ocr` | 视频硬字幕 → IR（vsf 找字幕段 + PP-OCRv5 检测/识别） | ✅ 已迁移 |
 | `convert` / `combine` | 字幕文件（SRT/ASS/VTT）→ IR；`combine --bilingual` 做双语对齐 | ✅ 已迁移 |
-| `ocr` / `from-script` | OCR / 剧本导入 | 🚧 待迁移 |
+| `from-script` | 纯文本剧本 → 带时间码的 IR（转写做锚点 + NW 全局对齐 + 未匹配行按字符数插值；支持行首说话人标签） | ✅ 已迁移 |
 | `correct` | IR 文本/时间码校正（空白、重复标点、空句、反序与重叠） | ✅ 已迁移 |
 | `translate` | 机器翻译（dub 现已能用译文轨道配音） | 🚧 待迁移 |
 | `quality` / `pipeline-graph` | QA 与 IR 工具 | 🚧 待迁移 |

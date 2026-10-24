@@ -119,6 +119,19 @@ struct OcrCommandOptions {
     double sample_fps = 1.0;
 };
 
+/// from-script：把纯文本剧本对齐到音视频，产出带时间码的 IR。
+struct FromScriptOptions {
+    std::string input;                    ///< 音视频（或已有 IR）
+    std::string script;                   ///< 剧本文本（一行一条字幕）
+    std::string out_ir;                   ///< 输出 IR（空 = <input>.script.iris.json）
+    std::string language = "en";
+    std::string asr_engine = "whisper";
+    std::string asr_model = "models/ggml/ggml-base.bin";
+    bool keep_speaker_labels_in_text = false; ///< true = 不剥离行首 "说话人:"
+};
+
+int run_from_script(const FromScriptOptions& options);
+
 /// serve：启动 REST 服务（异步任务 API）。
 int run_serve(const std::string& host, int port, const std::string& models_root,
               const std::string& work_root);

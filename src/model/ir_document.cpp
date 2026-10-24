@@ -86,6 +86,7 @@ nlohmann::json WorkflowConfig::to_json() const {
                         {"maxCharsPerLine", max_chars_per_line},
                         {"maxCps", max_cps}};
     if (subtitle_file_path) j["subtitleFilePath"] = *subtitle_file_path;
+  if (script_file_path) j["scriptFilePath"] = *script_file_path;
     if (output_file_path) j["outputFilePath"] = *output_file_path;
     if (transcriber_model) j["transcriberModel"] = *transcriber_model;
     return j;
@@ -96,6 +97,7 @@ WorkflowConfig WorkflowConfig::from_json(const nlohmann::json& j) {
     c.input_file_path = j.value("inputFilePath", std::string());
     c.command_name = j.value("commandName", std::string());
     set_opt(j, "subtitleFilePath", c.subtitle_file_path);
+  set_opt(j, "scriptFilePath", c.script_file_path);
     set_opt(j, "outputFilePath", c.output_file_path);
     c.device = j.value("device", std::string("auto"));
     c.transcriber_engine = j.value("transcriberEngine", std::string("whisper"));

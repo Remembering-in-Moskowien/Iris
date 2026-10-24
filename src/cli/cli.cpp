@@ -207,6 +207,23 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- from-script ----
+    auto* from_script = app.add_subcommand(
+        "from-script", "Align a plain-text script to the media and produce timed subtitles");
+    controller::FromScriptOptions from_script_opts;
+    from_script->add_option("input", from_script_opts.input, "Media file")->required();
+    from_script->add_option("--script,-s", from_script_opts.script, "Script file (one line = one cue)")
+        ->required();
+    from_script->add_option("--out,-o", from_script_opts.out_ir, "Output IR path");
+    from_script->add_option("--language,-l", from_script_opts.language, "Language code")
+        ->capture_default_str();
+    from_script->add_option("--asr-engine", from_script_opts.asr_engine, "ASR engine for timing")
+        ->capture_default_str();
+    from_script->add_option("--asr-model", from_script_opts.asr_model, "ASR model for timing")
+        ->capture_default_str();
+    from_script->add_flag("--keep-speaker-in-text", from_script_opts.keep_speaker_labels_in_text,
+                          "Keep the leading 'SPEAKER:' label inside the text");
+
     // ---- serve ----
     auto* serve = app.add_subcommand("serve", "Start the REST API (async job queue)");
     std::string serve_host = "127.0.0.1";
@@ -345,6 +362,7 @@ int run(int argc, char** argv) {
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
+    if (from_script->parsed()) return controller::run_from_script(from_script_opts);
     if (serve->parsed()) return controller::run_serve(serve_host, serve_port, serve_models, serve_work);
     if (models_list->parsed()) return controller::run_models_list(models_root);
     if (vsf->parsed()) {
@@ -366,6 +384,7 @@ int run(int argc, char** argv) {
     }
     if (translate->parsed()) return controller::run_translate(translate_opts);
     if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (from_script->parsed()) return controller::run_from_script(from_script_opts);
     if (serve->parsed()) return controller::run_serve(serve_host, serve_port, serve_models, serve_work);
     if (models_list->parsed()) return controller::run_models_list(models_root);
     if (models_install->parsed())

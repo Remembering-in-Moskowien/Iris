@@ -84,6 +84,7 @@ struct WorkflowConfig {
     std::string input_file_path;
     std::string command_name;
     std::optional<std::string> subtitle_file_path;
+  std::optional<std::string> script_file_path;   ///< from-script 使用的剧本文本
     std::optional<std::string> output_file_path;
     std::string device = "auto"; ///< auto|cpu|cuda|vulkan|directml
     std::string transcriber_engine = "whisper";

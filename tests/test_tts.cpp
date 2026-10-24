@@ -11,6 +11,7 @@
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/catalog/models.hpp"
+#include "iris/script/align.hpp"
 #include "iris/server/api.hpp"
 #include "iris/ui/console.hpp"
 #include "iris/server/http_server.hpp"
@@ -601,6 +602,69 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("script: tokenize, similarity and timeline alignment", "[script]") {
+    using iris::script::ScriptLine;
+
+    // 词元：英文小写、中文按字、标点作分隔
+    const auto tok = iris::script::tokenize("Hello, 世界!");
+    REQUIRE(tok == std::vector<std::string>{"hello", "世", "界"});
+
+    REQUIRE(iris::script::similarity("hello world", "hello world") > 0.99);
+    REQUIRE(iris::script::similarity("hello", "完全不同的内容") == 0.0);
+
+    // 剧本加载：剥离行首说话人标签、忽略空行
+    const auto tmp = std::filesystem::temp_directory_path() / "iris_script_test.txt";
+    {
+        std::ofstream f(tmp);
+        f << "SPEAKER_1: 第一句台词\n\n张三：第二句台词\n纯文本第三句\n";
+    }
+    std::string error;
+    const auto lines = iris::script::load_script(tmp.string(), true, error);
+    REQUIRE(lines.size() == 3);
+    REQUIRE(lines[0].speaker == "SPEAKER_1");
+    REQUIRE(lines[0].text == "第一句台词");
+    REQUIRE(lines[1].speaker == "张三");
+    REQUIRE(lines[1].text == "第二句台词");
+    REQUIRE(lines[2].speaker.empty());
+
+    // 对齐：中间一行能匹配到转写，首尾未匹配行按字符数分摊且时间单调
+    std::vector<iris::model::Sentence> anchors;
+    iris::model::Sentence a1;
+    a1.start_ms = 0;
+    a1.end_ms = 4000;
+    a1.text = "hello world";
+    anchors.push_back(a1);
+    iris::model::Sentence a2;
+    a2.start_ms = 4000;
+    a2.end_ms = 9000;
+    a2.text = "second sentence here";
+    anchors.push_back(a2);
+
+    std::vector<ScriptLine> script = {{"intro line", ""},
+                                      {"hello world", ""},
+                                      {"second sentence here", ""},
+                                      {"outro line", ""}};
+    const auto aligned = iris::script::align(script, anchors, 9000);
+    REQUIRE(aligned.size() == 4);
+    REQUIRE(aligned[1].matched_index == 0);
+    REQUIRE(aligned[2].matched_index == 1);
+    std::int64_t prev_end = -1;
+    for (const auto& line : aligned) {
+        REQUIRE(line.end_ms > line.start_ms);
+        REQUIRE(line.start_ms >= prev_end);
+        prev_end = line.end_ms;
+    }
+    REQUIRE(aligned.front().end_ms > 1); // 不是 1ms 碎片
+
+    // 没有锚点：按字符数铺满总时长
+    const auto spread = iris::script::align(script, {}, 8000);
+    REQUIRE(spread.size() == 4);
+    REQUIRE(spread.front().start_ms == 0);
+    REQUIRE(spread.back().end_ms >= 7000);
+
+    std::filesystem::remove(tmp);
 }
 
 TEST_CASE("ui: width-aware padding and human sizes", "[ui]") {
