@@ -35,7 +35,7 @@ int run(int argc, char** argv) {
     app.add_flag("-v,--verbose", verbose, "Verbose logging");
     std::string config_path;
     app.add_option("--config", config_path,
-                   "Config file (default: %APPDATA%/iris/config.json, legacy ./iris.config.json)")
+                   "Config file (default: <install drive>/iris/config.json; IRIS_HOME overrides)")
         ->envname("IRIS_CONFIG");
 
     // ---- asr ----

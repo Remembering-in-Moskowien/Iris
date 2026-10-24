@@ -6,6 +6,7 @@
 #include <string>
 
 #include "iris/infra/log.hpp"
+#include "iris/infra/paths.hpp"
 
 namespace iris::model {
 
@@ -132,31 +133,53 @@ std::string AppConfig::resolve(const std::string& value) const {
 // ---------------------------------------------------------------------------
 // 路径解析
 // ---------------------------------------------------------------------------
-std::string config_dir() {
+std::string data_root() {
+    // 1) 显式指定
+    if (const char* env = std::getenv("IRIS_HOME"); env != nullptr && *env != '\0') {
+        return fs::path(env).string();
+    }
 #ifdef _WIN32
+    // 2) 跟着安装盘走：D:\...\iris.exe → D:\iris
+    const fs::path exe_dir = infra::executable_dir();
+    if (!exe_dir.empty()) {
+        const std::string drive = exe_dir.root_name().string(); // 例："D:"
+        if (!drive.empty()) {
+            // 注意：fs::path("D:") / "iris" 是「驱动器相对路径」D:iris，
+            // 必须显式补上分隔符才是 D:\iris。
+            return drive + std::string(1, fs::path::preferred_separator) + "iris";
+        }
+    }
+    // 兜底：实在拿不到盘符才用 AppData
     if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr && *appdata != '\0') {
         return (fs::path(appdata) / "iris").string();
     }
-    if (const char* home = std::getenv("USERPROFILE"); home != nullptr && *home != '\0') {
-        return (fs::path(home) / ".config" / "iris").string();
-    }
 #else
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && *xdg != '\0') {
+    // 2) 数据目录约定（不占系统配置空间）
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') {
         return (fs::path(xdg) / "iris").string();
     }
     if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
-        return (fs::path(home) / ".config" / "iris").string();
+        return (fs::path(home) / ".local" / "share" / "iris").string();
     }
 #endif
-    return (fs::path(".config") / "iris").string();
+    return "iris-data";
 }
 
+std::string config_dir() { return data_root(); }
+
 std::string default_config_path() {
-    return (fs::path(config_dir()) / "config.json").string();
+    return (fs::path(data_root()) / "config.json").string();
 }
 
 std::string default_models_dir() {
-    return (fs::path(config_dir()) / "models").string();
+    return (fs::path(data_root()) / "models").string();
+}
+
+std::string legacy_appdata_config() {
+    if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr && *appdata != '\0') {
+        return (fs::path(appdata) / "iris" / "config.json").string();
+    }
+    return {};
 }
 
 std::string resolve_config_path(const std::string& explicit_path) {
@@ -164,12 +187,32 @@ std::string resolve_config_path(const std::string& explicit_path) {
     if (const char* env = std::getenv("IRIS_CONFIG"); env != nullptr && *env != '\0') {
         return env;
     }
-    const std::string user_config = default_config_path();
+    const std::string root_config = default_config_path();
     std::error_code ec;
-    if (fs::exists(user_config, ec)) return user_config;
-    // 兼容：仓库根目录的旧配置文件
+    if (fs::exists(root_config, ec)) return root_config;
+    // 仓库内旧配置（开发时的习惯位置）
     if (fs::exists("iris.config.json", ec)) return "iris.config.json";
-    return user_config;
+
+    // 旧版写在 %APPDATA% 的配置：迁移到数据根目录，避免继续把模型指向系统盘
+    const std::string legacy = legacy_appdata_config();
+    if (!legacy.empty() && fs::exists(legacy, ec)) {
+        const auto migrated = AppConfig::load_or_default(legacy);
+        AppConfig fresh = migrated;
+        const char* appdata_env = std::getenv("APPDATA");
+        const bool models_on_system_drive =
+            fresh.models_dir.empty() ||
+            (appdata_env != nullptr && fresh.models_dir.rfind(appdata_env, 0) == 0);
+        if (models_on_system_drive) fresh.models_dir = default_models_dir();
+        try {
+            fresh.save(root_config);
+            spdlog::info("config: 已从 {} 迁移到 {}（模型目录 {}）", legacy, root_config,
+                         fresh.models_dir);
+        } catch (...) {
+            return legacy; // 迁移失败就继续用旧文件
+        }
+        return root_config;
+    }
+    return root_config;
 }
 
 const std::string& active_config_path() { return g_config_path; }

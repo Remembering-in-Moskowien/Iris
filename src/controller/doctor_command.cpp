@@ -64,7 +64,8 @@ int run_doctor() {
     // ---- 配置 ----
     ui::section(_("Configuration", "配置"));
     const auto& cfg = model::active_config();
-    ui::kv_table({{_("config file", "配置文件"), model::active_config_path()},
+    ui::kv_table({{_("data root", "数据根目录"), model::data_root()},
+                  {_("config file", "配置文件"), model::active_config_path()},
                   {_("tools dir", "工具目录"), cfg.tools_dir},
                   {_("models dir", "模型目录"), cfg.models_dir},
                   {_("mirror", "镜像"),

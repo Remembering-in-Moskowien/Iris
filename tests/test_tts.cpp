@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -603,6 +604,41 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("config: data root follows IRIS_HOME and the install drive", "[config]") {
+    const char* old = std::getenv("IRIS_HOME");
+    const std::string saved = old != nullptr ? old : "";
+
+#ifdef _WIN32
+    _putenv_s("IRIS_HOME", "D:/iris-home");
+#else
+    setenv("IRIS_HOME", "D:/iris-home", 1);
+#endif
+    REQUIRE(iris::model::data_root() == std::filesystem::path("D:/iris-home").string());
+    REQUIRE(iris::model::default_config_path() ==
+            (std::filesystem::path("D:/iris-home") / "config.json").string());
+    REQUIRE(iris::model::default_models_dir() ==
+            (std::filesystem::path("D:/iris-home") / "models").string());
+
+#ifdef _WIN32
+    _putenv_s("IRIS_HOME", saved.c_str());
+#else
+    if (saved.empty()) {
+        unsetenv("IRIS_HOME");
+    } else {
+        setenv("IRIS_HOME", saved.c_str(), 1);
+    }
+#endif
+
+    // 未设置 IRIS_HOME 时：Windows 跟随安装盘（形如 "X:\iris"），其它平台走数据目录
+#ifdef _WIN32
+    const auto root = iris::model::data_root();
+    REQUIRE(root.size() >= 2);
+    REQUIRE(root[1] == ':');
+    REQUIRE(root.find("iris") != std::string::npos);
+    REQUIRE(root.rfind("AppData", 0) != 0);
+#endif
 }
 
 TEST_CASE("config: json round-trip and model path resolution", "[config]") {

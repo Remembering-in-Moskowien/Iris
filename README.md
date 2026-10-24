@@ -327,16 +327,20 @@ MIT — 见 [LICENSE](LICENSE)。
 
 模型与全局设置放在用户目录的 JSON 里，不再依赖仓库内路径：
 
-| 平台 | 配置文件 |
-|---|---|
-| Windows | `%APPDATA%\iris\config.json` |
-| Linux/macOS | `$XDG_CONFIG_HOME/iris/config.json`（缺省 `~/.config/iris`） |
+**数据根目录**跟着安装位置走，不占系统盘：
+
+| 平台 | 数据根目录 | 配置文件 |
+|---|---|---|
+| Windows | `<安装盘>:\iris`（如 `D:\iris`） | `D:\iris\config.json` |
+| Linux/macOS | `$XDG_DATA_HOME/iris`（缺省 `~/.local/share/iris`） | `…/iris/config.json` |
+
+可用 `IRIS_HOME` 显式覆盖数据根目录。旧版写在 `%APPDATA%\iris\config.json` 的配置会在首次运行时**自动迁移**到数据根目录（若其中的模型目录指向系统盘，会一并改到新位置）。
 
 查找顺序：`--config <path>` → `IRIS_CONFIG` → 用户目录 → 仓库内 `./iris.config.json`（兼容旧用法）。
 首次运行会自动生成配置文件与模型目录（若仓库内已有 `models/` 则沿用它，避免打断现有工作流）。
 
 ```bash
-iris config path     # 当前配置文件
+iris config path     # 当前配置文件（默认 D:\iris\config.json）
 iris config show     # 当前配置（JSON）
 iris config init     # 生成默认配置
 iris --config other.json asr in.mp4 -l zh

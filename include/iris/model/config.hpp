@@ -59,13 +59,20 @@ struct AppConfig {
     [[nodiscard]] std::string resolve(const std::string& value) const;
 };
 
-/// 用户配置目录（%APPDATA%\iris 或 ~/.config/iris）。
+/// 数据根目录：
+///   IRIS_HOME 环境变量（显式指定）
+///   > Windows：可执行文件所在盘的根目录 + "iris"（如 D:\iris）——避免占用 C 盘
+///   > POSIX：$XDG_DATA_HOME/iris 或 ~/.local/share/iris
+/// 安装在哪块盘，数据就落在哪块盘，不会挤占系统盘空间。
+std::string data_root();
+
+/// 配置目录（= data_root()）。
 std::string config_dir();
 
-/// 默认配置文件路径（config_dir()/config.json）。
+/// 默认配置文件路径（data_root()/config.json）。
 std::string default_config_path();
 
-/// 默认模型目录（用户目录下 iris/models）。
+/// 默认模型目录（data_root()/models）。
 std::string default_models_dir();
 
 /// 解析实际使用的配置文件：显式参数 > IRIS_CONFIG > 用户目录 > 仓库内旧文件。

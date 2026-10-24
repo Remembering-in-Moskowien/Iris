@@ -65,6 +65,7 @@ add_library(iris_core
     src/script/align.cpp
     src/infra/quiet.cpp
     src/infra/log.cpp
+    src/infra/paths.cpp
     src/server/http_server.cpp
     src/server/api.cpp
     src/subtitle/parser.cpp
