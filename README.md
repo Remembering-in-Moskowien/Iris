@@ -150,11 +150,17 @@ TTS 引擎：
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | P1 | 自研 GGUF 解析（元数据 + 张量表） | ✅ `iris tts --inspect --model <gguf>` 可读真实权重 |
-| P1b | 自研变速（WSOLA，替代 ffmpeg atempo） | ✅ dub 已使用，20 项测试覆盖 |
-| P2 | Talker 前向（28 层 GQA + mRoPE + KV cache + 采样） | 🚧 待实现 |
+| P1b | 自研变速（WSOLA，替代 ffmpeg atempo） | ✅ dub 已使用 |
+| P2 | Talker 前向（28 层 GQA + q/k-norm + mRoPE + KV cache） | ✅ 前向与增量解码一致（<1e-3） |
+| P2.3 | 提示词布局 + 与参考实现的 logits parity + 采样循环 | 🚧 进行中 |
 | P3 | Code predictor（5 层深度变换器 × 16 码本/帧） | 🚧 待实现 |
 | P4 | 解码器（RVQ dequant + 8 层 + Snake + 转置卷积 → 24 kHz） | 🚧 待实现 |
 | P5 | Speaker encoder（音色克隆）+ BPE 文本前端 | 🚧 待实现 |
+
+> parity 基准已就绪：参考后端支持 `QWEN3_TTS_DUMP_DIR=<dir>` 导出
+> `talker_prefill_logits.bin`(3072)、`icl_input.bin`(139×1024)、
+> `generated_codes_s00.bin`(30 帧×16 码本)、`cp_f*/step*` 等中间张量，
+> 可直接用来逐层对拍自研推理。
 
 `iris tts --inspect` 读出的模型结构（可作为运行时实现的对照表）：
 
