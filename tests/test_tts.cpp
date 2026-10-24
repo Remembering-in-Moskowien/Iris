@@ -4,11 +4,13 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
+#include "iris/catalog/models.hpp"
 #include "iris/ocr/rapid_ocr.hpp"
 #include "iris/quality/report.hpp"
 #include "iris/ops/dub_tts.hpp"
@@ -596,6 +598,59 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("catalog: model registry integrity and helpers", "[catalog]") {
+    using namespace iris::catalog;
+
+    std::vector<std::string> keys;
+    for (const auto& entry : all()) {
+        // key 唯一
+        REQUIRE(std::find(keys.begin(), keys.end(), entry.key) == keys.end());
+        keys.push_back(entry.key);
+        REQUIRE(!entry.category.empty());
+        REQUIRE(!entry.name.empty());
+        // 可下载条目必须给 https 地址；手动条目允许空地址
+        for (const auto& file : entry.files) {
+            REQUIRE(!file.filename.empty());
+            if (!file.url.empty()) REQUIRE(file.url.rfind("https://", 0) == 0);
+        }
+    }
+    REQUIRE(keys.size() >= 15);
+
+    // 查找
+    REQUIRE(find("ppocrv5") != nullptr);
+    REQUIRE(find("nope") == nullptr);
+    REQUIRE(by_category("ocr").size() == 1);
+    REQUIRE(!categories().empty());
+
+    // 镜像重写
+    REQUIRE(rewrite_url("https://huggingface.co/a/b/resolve/main/x.gguf", "https://hf-mirror.com") ==
+            "https://hf-mirror.com/a/b/resolve/main/x.gguf");
+    REQUIRE(rewrite_url("https://huggingface.co/a/b", "https://hf-mirror.com/") ==
+            "https://hf-mirror.com/a/b");
+    REQUIRE(rewrite_url("https://example.com/x", "https://hf-mirror.com") == "https://example.com/x");
+    REQUIRE(rewrite_url("https://huggingface.co/a/b", "") == "https://huggingface.co/a/b");
+
+    // 落盘路径与安装检测
+    const auto* entry = find("ppocrv5");
+    REQUIRE(entry != nullptr);
+    REQUIRE(target_dir(*entry, "models") ==
+            (std::filesystem::path("models") / "ocr").string());
+    REQUIRE(target_path(*entry, entry->files.front(), "models") ==
+            (std::filesystem::path("models") / "ocr" / entry->files.front().filename).string());
+
+    const auto tmp = std::filesystem::temp_directory_path() / "iris_catalog_test";
+    std::error_code ec;
+    std::filesystem::remove_all(tmp, ec);
+    std::filesystem::create_directories(tmp / "ocr", ec);
+    REQUIRE_FALSE(installed(*entry, tmp.string()));
+    for (const auto& file : entry->files) {
+        std::ofstream f(target_path(*entry, file, tmp.string()));
+        f << "x";
+    }
+    REQUIRE(installed(*entry, tmp.string()));
+    std::filesystem::remove_all(tmp, ec);
 }
 
 TEST_CASE("quality: metrics, issue detection and HTML escaping", "[quality]") {

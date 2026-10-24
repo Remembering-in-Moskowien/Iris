@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "iris/asr/asr.hpp"
+#include "iris/catalog/models.hpp"
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/process.hpp"
 #include "iris/model/config.hpp"
@@ -55,6 +56,35 @@ int run_doctor() {
     std::cout << "models dir: " << cfg.models_dir << '\n';
     std::cout << "download proxy: " << (cfg.download_proxy.empty() ? "(none)" : cfg.download_proxy)
               << '\n';
+    // ---- 模型清单（按类别统计安装情况）----
+    std::cout << "models (models/ + ~/.cache/crispasr):\n";
+    int total_ok = 0;
+    int total = 0;
+    std::vector<std::string> missing;
+    for (const auto& category : catalog::categories()) {
+        int ok = 0;
+        int count = 0;
+        std::string miss;
+        for (const auto* entry : catalog::by_category(category)) {
+            ++count;
+            ++total;
+            if (catalog::installed(*entry, "models")) {
+                ++ok;
+                ++total_ok;
+            } else if (!entry->files.empty()) {
+                miss += (miss.empty() ? "" : ",") + entry->key;
+            }
+        }
+        std::cout << "  " << category << ": " << ok << "/" << count << '\n';
+        if (!miss.empty()) {
+            std::cout << "    missing: " << miss << '\n';
+            missing.push_back(category + ": " + miss);
+        }
+    }
+    std::cout << "  total: " << total_ok << "/" << total
+              << _(" (run `iris models install --category <name>` to fetch)", "（可用 `iris models install --category <name>` 下载）")
+              << '\n';
+
     return 0;
 }
 

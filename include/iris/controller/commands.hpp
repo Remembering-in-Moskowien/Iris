@@ -119,6 +119,14 @@ struct OcrCommandOptions {
     double sample_fps = 1.0;
 };
 
+/// models list：列出注册表里模型的本机安装状态。
+int run_models_list(const std::string& models_root);
+
+/// models install：按 key / 类别 / 全部下载模型（已存在则跳过）。
+int run_models_install(const std::vector<std::string>& keys, const std::string& models_root,
+                       const std::string& mirror, bool all, const std::string& category,
+                       bool dry_run);
+
 /// quality：统计 IR 的字幕质量指标并渲染 HTML 报告（有 error 时返回 2）。
 int run_quality(const std::string& ir_path, const std::string& out_html);
 

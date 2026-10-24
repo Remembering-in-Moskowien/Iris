@@ -257,6 +257,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | `dub` | 配音链路：媒体/IR → (asr) → (emotion) → 逐句 TTS → 配音音轨 | ✅ 已迁移 |
 | `vsf` | 视频硬字幕帧定位（自实现，无 OpenCV） | ✅ 已迁移 |
 | `init` | 交互式设置 | 🚧 待迁移 |
+| `models` | 模型注册表：`models list` 看安装状态，`models install [keys] [--all] [--category x]` 一键下载（支持 `--mirror`/`IRIS_HF_MIRROR`） | ✅ 已迁移 |
 | `quality` | 字幕质量报告（CPS/重叠/空白/重复/说话人，输出自包含 HTML；有 error 时 exit 2） | ✅ 已迁移 |
 | `ocr` | 视频硬字幕 → IR（vsf 找字幕段 + PP-OCRv5 检测/识别） | ✅ 已迁移 |
 | `convert` / `combine` | 字幕文件（SRT/ASS/VTT）→ IR；`combine --bilingual` 做双语对齐 | ✅ 已迁移 |

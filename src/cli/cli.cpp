@@ -95,10 +95,6 @@ int run(int argc, char** argv) {
     // ---- doctor ----
     app.add_subcommand("doctor", "Environment diagnostics");
 
-    // ---- models ----
-    auto* models = app.add_subcommand("models", "Model & provider registry");
-    std::string models_sub = "list";
-    models->add_option("sub", models_sub, "Subcommand (list)");
 
     // ---- vsf ----
     auto* vsf = app.add_subcommand("vsf", "Detect hard-subtitle frames in a fixed ROI (self-implemented, no OpenCV)");
@@ -210,6 +206,30 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- models ----
+    auto* models = app.add_subcommand("models", "List or install the models iris uses");
+    auto* models_list = models->add_subcommand("list", "Show installed / missing models");
+    std::string models_root = "models";
+    std::string models_mirror = [] {
+        const char* env = std::getenv("IRIS_HF_MIRROR");
+        return env != nullptr ? std::string(env) : std::string();
+    }();
+    models_list->add_option("--root", models_root, "Models directory")->capture_default_str();
+
+    auto* models_install = models->add_subcommand("install", "Download models into the models tree");
+    std::vector<std::string> install_keys;
+    std::string install_category;
+    bool install_all = false;
+    bool install_dry = false;
+    models_install->add_option("keys", install_keys, "Model keys (e.g. ppocrv5 whisper-base)")
+        ->expected(0, -1);
+    models_install->add_option("--root", models_root, "Models directory")->capture_default_str();
+    models_install->add_option("--mirror", models_mirror,
+                               "Hugging Face mirror base (default: $IRIS_HF_MIRROR)");
+    models_install->add_option("--category", install_category, "Install a whole category");
+    models_install->add_flag("--all", install_all, "Install every registered model");
+    models_install->add_flag("--dry-run", install_dry, "Show what would be downloaded");
+
     // ---- quality ----
     auto* quality = app.add_subcommand(
         "quality", "Analyse an IR and write a self-contained HTML quality report");
@@ -313,7 +333,7 @@ int run(int argc, char** argv) {
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
-    if (models->parsed()) return controller::run_models_list();
+    if (models_list->parsed()) return controller::run_models_list(models_root);
     if (vsf->parsed()) {
         int rx=0, ry=0, rw=0, rh=0;
         if (std::sscanf(vsf_roi_str.c_str(), "%d,%d,%d,%d", &rx, &ry, &rw, &rh) != 4) {
@@ -333,6 +353,10 @@ int run(int argc, char** argv) {
     }
     if (translate->parsed()) return controller::run_translate(translate_opts);
     if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (models_list->parsed()) return controller::run_models_list(models_root);
+    if (models_install->parsed())
+        return controller::run_models_install(install_keys, models_root, models_mirror, install_all,
+                                              install_category, install_dry);
     if (quality->parsed()) return controller::run_quality(quality_ir, quality_out);
     if (ocr->parsed()) return controller::run_ocr(ocr_opts);
     if (convert->parsed()) return controller::run_convert(convert_inputs, convert_lang, convert_out);
