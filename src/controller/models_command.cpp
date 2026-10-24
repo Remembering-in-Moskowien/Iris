@@ -16,6 +16,7 @@
 #include "iris/infra/log.hpp"
 #include "iris/infra/process.hpp"
 #include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 
 namespace iris::controller {
 
@@ -71,6 +72,22 @@ bool download_one(const std::string& url, const std::string& target, std::string
 } // namespace
 
 int run_models_list(const std::string& models_root) {
+    if (ui::json_mode()) {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& entry : catalog::all()) {
+            arr.push_back({{"key", entry.key},
+                           {"category", entry.category},
+                           {"name", entry.name},
+                           {"bytes", entry.bytes},
+                           {"installed", catalog::installed(entry, models_root)}});
+        }
+        ui::json_out(nlohmann::json({{"ok", true},
+                                     {"command", "models list"},
+                                     {"modelsDir", models_root},
+                                     {"models", arr}})
+                         .dump(2));
+        return 0;
+    }
     ui::banner("iris models", _("installed models under ", "模型目录 ") + models_root);
     for (const auto& category : catalog::categories()) {
         ui::section(category);

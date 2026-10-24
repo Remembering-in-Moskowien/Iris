@@ -13,6 +13,7 @@
 #include "iris/text/punctuate.hpp"
 #include "iris/infra/log.hpp"
 #include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 #include "iris/model/config.hpp"
 
 namespace iris::cli {
@@ -35,6 +36,8 @@ int run(int argc, char** argv) {
     bool verbose = false;
     app.add_flag("-v,--verbose", verbose, "Verbose logging");
     bool agent = false;
+    bool json_output = false;
+    app.add_flag("--json", json_output, "JSON mode: stdout carries only a JSON result document");
     app.add_flag("--agent", agent,
                  "Agent mode: plain INFO/OK/WARN/ERROR output, no colours, spinners or timestamps");
     std::string config_path;
@@ -324,6 +327,7 @@ int run(int argc, char** argv) {
         agent_env != nullptr && *agent_env != '0' && *agent_env != '\0') {
         agent = true;
     }
+    if (json_output) iris::ui::set_json_mode(true);
     if (agent) iris::ui::set_agent_mode(true);
     infra::init_logger(verbose);
 
@@ -334,7 +338,8 @@ int run(int argc, char** argv) {
         spdlog::info("models: {}", cfg.models_dir);
     }
 
-    // 分发到 MVC Controller 层。
+    // 分发到 MVC Controller 层（包成 lambda，便于统一兜底 JSON 输出）。
+    const int rc = [&]() -> int {
     if (asr->parsed()) {
         // 配置里的默认值：--model 未给时用 asr.model，--split-model 仍是默认目录时用 sat.modelDir
         if (asr_model.empty()) asr_model = cfg.resolve(cfg.asr_model);
@@ -457,6 +462,13 @@ int run(int argc, char** argv) {
     // 无子命令
     std::cout << app.help() << '\n';
     return 0;
+    }();
+
+    // JSON 模式兜底：确保 stdout 恰好一个 JSON 文档（命令自己没输出时补一个）
+    if (iris::ui::json_mode() && !iris::ui::json_was_emitted()) {
+        iris::ui::json_out(nlohmann::json({{"ok", rc == 0}, {"exitCode", rc}}).dump(2));
+    }
+    return rc;
 }
 
 } // namespace iris::cli

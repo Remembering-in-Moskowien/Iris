@@ -11,6 +11,7 @@
 #include "iris/model/ir_document.hpp"
 #include "iris/quality/report.hpp"
 #include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 
 namespace iris::controller {
 
@@ -76,6 +77,32 @@ int run_quality(const std::string& ir_path, const std::string& out_html) {
     f << quality::to_html(doc, report);
     f.close();
     ui::step(_("report written: ", "报告已写入：") + target);
+
+    // JSON 模式：结构化摘要
+    {
+        nlohmann::json tracks = nlohmann::json::array();
+        for (const auto& t : report.tracks) {
+            tracks.push_back({{"type", t.type},
+                              {"language", t.language},
+                              {"cues", t.cues},
+                              {"coverage", t.coverage},
+                              {"avgChars", t.avg_chars},
+                              {"maxCps", t.max_cps},
+                              {"overlaps", t.overlaps},
+                              {"longGaps", t.long_gaps},
+                              {"duplicates", t.duplicates},
+                              {"emptyCues", t.empty_cues},
+                              {"issues", t.issues.size()}});
+        }
+        ui::json_out(nlohmann::json({{"ok", report.errors == 0},
+                                     {"command", "quality"},
+                                     {"ir", ir_path},
+                                     {"report", target},
+                                     {"errors", report.errors},
+                                     {"warnings", report.warnings},
+                                     {"tracks", tracks}})
+                         .dump(2));
+    }
 
     // 有 error 时返回 2，方便脚本把质量检查挂进流水线
     return report.errors == 0 ? 0 : 2;

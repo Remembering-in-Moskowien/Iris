@@ -1,5 +1,6 @@
 #include "iris/controller/commands.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -8,6 +9,7 @@
 #include "iris/core/pipeline.hpp"
 #include "iris/infra/log.hpp"
 #include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 #include "iris/model/config.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/ops/audio_preprocess.hpp"
@@ -123,6 +125,32 @@ int run_asr(const std::string& input, const std::string& language, const std::st
         output.empty() ? fs::path(input + ".iris.json") : fs::path(output);
     doc.save(out_path.string());
     spdlog::info("asr: 已保存 IR -> {}", out_path.string());
+
+    // JSON 模式：给调用方一个结构化结果
+    int sentences = 0;
+    int speakers = 0;
+    std::vector<std::string> labels;
+    for (const auto& track : doc.state.tracks) {
+        sentences += static_cast<int>(track.sentences.size());
+        for (const auto& s : track.sentences) {
+            if (s.speaker && std::find(labels.begin(), labels.end(), *s.speaker) == labels.end()) {
+                labels.push_back(*s.speaker);
+            }
+        }
+    }
+    speakers = static_cast<int>(labels.size());
+    ui::json_out(nlohmann::json({{"ok", true},
+                                 {"command", "asr"},
+                                 {"input", input},
+                                 {"ir", out_path.string()},
+                                 {"engine", engine},
+                                 {"language", language},
+                                 {"sentences", sentences},
+                                 {"speakers", speakers},
+                                 {"diarized", diarize != nullptr},
+                                 {"punc", !punc_model.empty()},
+                                 {"split", split_strategy}})
+                     .dump(2));
     return 0;
 }
 

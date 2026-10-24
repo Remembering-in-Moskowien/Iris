@@ -10,6 +10,7 @@
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
 #include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 #include "iris/model/ir_document.hpp"
 #include "iris/ops/asr_pipeline.hpp"
 #include "iris/ops/translate.hpp"
@@ -117,12 +118,24 @@ int run_translate(const TranslateCommandOptions& opts) {
     }
 
     // 输出译文（便于直接观察质量）
+    int translated = 0;
     for (const auto& track : doc.state.tracks) {
         if (track.type != "translation") continue;
         for (const auto& s : track.sentences) {
-            if (s.translated_text) std::cout << *s.translated_text << '\n';
+            if (s.translated_text) {
+                std::cout << *s.translated_text << '\n';
+                ++translated;
+            }
         }
     }
+    ui::json_out(nlohmann::json({{"ok", true},
+                                 {"command", "translate"},
+                                 {"ir", out},
+                                 {"from", opts.from},
+                                 {"to", opts.to},
+                                 {"engine", opts.engine},
+                                 {"sentences", translated}})
+                     .dump(2));
     return 0;
 }
 

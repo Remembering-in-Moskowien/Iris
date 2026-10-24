@@ -386,3 +386,30 @@ OK    transcribe (1.4s)
 - 日志去掉时间戳与颜色，格式为 `LEVEL message`；
 - 符号退化为 ASCII（`OK / ERR / -> / >`）；
 - `IRIS_AGENT=1` 等价于 `--agent`，可用于让 `serve` 派发的子任务也保持该格式。
+## JSON 模式（`--json`）
+
+stdout 只输出**一个** JSON 文档，人类可读内容与日志全部让路（日志改走 stderr），便于程序/agent 直接解析：
+
+```bash
+$ iris --json asr in.mp4 -l zh -o out.iris.json
+{
+  "ok": true,
+  "command": "asr",
+  "input": "in.mp4",
+  "ir": "out.iris.json",
+  "engine": "whisper",
+  "language": "zh",
+  "sentences": 42,
+  "speakers": 2,
+  "diarized": true,
+  "punc": true,
+  "split": "sat"
+}
+```
+
+- `--json` 与 `--agent` 互斥于表现形式：前者只给结构化结果，后者给带前缀的人类可读行；
+- 失败时同样有 JSON：命令自身没输出时兜底为 `{"ok": false, "exitCode": N}`；
+- 各命令的结果字段：`asr`（ir/sentences/speakers）、`translate`（ir/from/to/sentences）、
+  `dub`（audio）、`build`（output/format/lines）、`quality`（errors/warnings/report/tracks）、
+  `ocr`（ir/cues/roi）、`from-script`（ir/lines/matched/interpolated）、`models list`（models[]）；
+- 其余命令走兜底文档，退出码始终反映真实结果。

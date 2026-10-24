@@ -5,6 +5,8 @@
 #include <string>
 
 #include "iris/infra/log.hpp"
+#include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 #include "iris/model/ir_document.hpp"
 #include "iris/model/subtitle.hpp"
 #include "iris/view/subtitle_renderer.hpp"
@@ -64,6 +66,13 @@ int run_build(const std::string& ir_path, const std::string& format, const std::
     }
     os << body;
     spdlog::info("build: 已生成 {}（{} 行）", out_path.string(), sd.lines.size());
+    ui::json_out(nlohmann::json({{"ok", true},
+                                 {"command", "build"},
+                                 {"ir", ir_path},
+                                 {"output", out_path.string()},
+                                 {"format", format},
+                                 {"lines", sd.lines.size()}})
+                     .dump(2));
     return 0;
 }
 

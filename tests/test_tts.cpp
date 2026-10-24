@@ -606,6 +606,25 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
     }
 }
 
+TEST_CASE("ui: json mode silences human output and tracks emission", "[ui]") {
+    REQUIRE_FALSE(iris::ui::json_mode());
+    REQUIRE_FALSE(iris::ui::json_was_emitted());
+
+    iris::ui::set_json_mode(true);
+    REQUIRE(iris::ui::json_mode());
+    REQUIRE_FALSE(iris::ui::colors_enabled());
+    // 人类可读调用不抛异常且被吞掉
+    iris::ui::banner("t", "s");
+    iris::ui::success("ok");
+
+    // 结果文档只输出一次，并记录已发出
+    iris::ui::json_out("{\"ok\":true}");
+    REQUIRE(iris::ui::json_was_emitted());
+
+    iris::ui::set_json_mode(false);
+    REQUIRE_FALSE(iris::ui::json_mode());
+}
+
 TEST_CASE("ui: agent mode switches to plain prefixed output", "[ui]") {
     iris::ui::set_agent_mode(true);
     REQUIRE(iris::ui::agent_mode());

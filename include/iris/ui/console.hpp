@@ -44,6 +44,17 @@ void set_agent_mode(bool on);
 /// 行首前缀（agent 模式使用；非 agent 模式返回空串）。
 std::string agent_prefix(const std::string& level);
 
+/// JSON 模式（对应 C# 的 --json）：抑制所有人类可读输出，
+/// 只在 stdout 输出一个 JSON 文档；日志改走 stderr，保证 stdout 可被直接解析。
+void set_json_mode(bool on);
+[[nodiscard]] bool json_mode();
+
+/// 输出最终 JSON 结果（仅 json 模式；非 json 模式忽略）。
+void json_out(const std::string& body);
+
+/// 本次运行是否已经输出过 JSON 结果（用于命令行兜底）。
+bool json_was_emitted();
+
 /// 是否启用颜色（TTY 且未设置 NO_COLOR / IRIS_PLAIN）。
 bool colors_enabled();
 

@@ -11,6 +11,8 @@
 
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 #include "iris/infra/pipe_reader.hpp"
 #include "iris/infra/process.hpp"
 #include "iris/model/ir_document.hpp"
@@ -249,6 +251,14 @@ int run_ocr(const OcrCommandOptions& opts) {
     const std::string out = opts.out_ir.empty() ? opts.input + ".ocr.iris.json" : opts.out_ir;
     doc.save(out);
     std::cout << _("ocr: cues ", "ocr: 字幕条数 ") << cues.size() << _(" → ", " → ") << out << '\n';
+    ui::json_out(nlohmann::json({{"ok", true},
+                                 {"command", "ocr"},
+                                 {"input", opts.input},
+                                 {"ir", out},
+                                 {"cues", cues.size()},
+                                 {"roi", std::to_string(rx) + "," + std::to_string(ry) + "," +
+                                             std::to_string(rw) + "," + std::to_string(rh)}})
+                     .dump(2));
     return 0;
 }
 

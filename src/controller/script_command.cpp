@@ -14,6 +14,7 @@
 #include "iris/ops/asr_pipeline.hpp"
 #include "iris/script/align.hpp"
 #include "iris/ui/console.hpp"
+#include <nlohmann/json.hpp>
 
 namespace iris::controller {
 
@@ -151,6 +152,16 @@ int run_from_script(const FromScriptOptions& opts) {
     }
 
     ui::finish(true, _("wrote ", "已写出 ") + out);
+    ui::json_out(nlohmann::json({{"ok", true},
+                                 {"command", "from-script"},
+                                 {"input", opts.input},
+                                 {"script", opts.script},
+                                 {"ir", out},
+                                 {"lines", aligned.size()},
+                                 {"matched", matched},
+                                 {"interpolated", interpolated},
+                                 {"language", opts.language}})
+                     .dump(2));
     return 0;
 }
 

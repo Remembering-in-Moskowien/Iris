@@ -235,6 +235,12 @@ int run_dub(const DubOptions& opts) {
         return 1;
     }
     std::cout << _("dub: wrote ", "dub: 写出 ") << *doc.state.dubbed_audio_path << '\n';
+    ui::json_out(nlohmann::json({{"ok", true},
+                                 {"command", "dub"},
+                                 {"audio", *doc.state.dubbed_audio_path},
+                                 {"voices", opts.voices_json.empty() && opts.voice_refs.empty() ? 0 : -1},
+                                 {"language", opts.language}})
+                     .dump(2));
     return 0;
 }
 

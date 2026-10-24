@@ -32,6 +32,8 @@ std::atomic<bool> g_tty{false};
 std::mutex g_out_mutex;
 
 std::atomic<bool> g_agent{false};
+std::atomic<bool> g_json{false};
+std::atomic<bool> g_json_emitted{false};
 Symbols g_symbols;
 
 bool env_set(const char* name) {
@@ -228,6 +230,13 @@ private:
     bool console_ = false;
 };
 
+/// JSON 模式：吞掉所有经 std::cout 的人类可读输出（结果文档走 json_out 的独立通道）。
+class NullBuf : public std::streambuf {
+protected:
+    int_type overflow(int_type c) override { return traits_type::not_eof(c); }
+    std::streamsize xsputn(const char*, std::streamsize n) override { return n; }
+};
+
 std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -340,6 +349,40 @@ std::string agent_prefix(const std::string& level) {
     return prefix + ' ';
 }
 
+void set_json_mode(bool on) {
+    g_json.store(on);
+    init();
+    static NullBuf null_buf;
+    if (on) {
+        std::cout.rdbuf(&null_buf); // stdout 只留给结果文档
+        // JSON 模式：无颜色、无装饰、无动画
+        g_tty.store(false);
+        g_colors.store(false);
+        g_unicode.store(false);
+        g_symbols = make_symbols(false);
+    } else if (g_tty.load()) {
+        // 退出 JSON 模式：恢复常规输出（仅当原本是控制台时）
+        std::cout.rdbuf(nullptr);
+    }
+}
+
+bool json_mode() {
+    init();
+    return g_json.load();
+}
+
+bool json_was_emitted() { return g_json_emitted.load(); }
+
+void json_out(const std::string& body) {
+    if (!g_json.load() || body.empty()) return;
+    g_json_emitted.store(true);
+    std::lock_guard<std::mutex> lock(g_out_mutex);
+    // 直接用字节写 stdout，避免被 ConsoleBuf 的宽字符路径影响
+    std::fwrite(body.data(), 1, body.size(), stdout);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+}
+
 std::string bold(const std::string& s) { return paint("1", s); }
 std::string dim(const std::string& s) { return paint("90", s); }
 std::string green(const std::string& s) { return paint("32", s); }
@@ -426,6 +469,7 @@ std::string human_duration(double seconds) {
 }
 
 void banner(const std::string& title, const std::string& subtitle) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << "INFO  " << title;
@@ -454,6 +498,7 @@ void banner(const std::string& title, const std::string& subtitle) {
 }
 
 void section(const std::string& title) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << "INFO  == " << title << " ==\n";
@@ -463,6 +508,7 @@ void section(const std::string& title) {
 }
 
 void success(const std::string& message) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << "OK    " << message << '\n';
@@ -472,6 +518,7 @@ void success(const std::string& message) {
 }
 
 void failure(const std::string& message) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cerr << "ERROR " << message << '\n';
@@ -481,6 +528,7 @@ void failure(const std::string& message) {
 }
 
 void warning(const std::string& message) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << "WARN  " << message << '\n';
@@ -490,6 +538,7 @@ void warning(const std::string& message) {
 }
 
 void step(const std::string& message) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << "STEP  " << message << '\n';
@@ -499,6 +548,7 @@ void step(const std::string& message) {
 }
 
 void note(const std::string& message) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << "INFO  " << message << '\n';
@@ -508,6 +558,7 @@ void note(const std::string& message) {
 }
 
 void finish(bool ok, const std::string& message) {
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << (ok ? "OK    " : "ERROR ") << message << '\n';
@@ -519,6 +570,7 @@ void finish(bool ok, const std::string& message) {
 }
 
 void kv_table(const std::vector<std::pair<std::string, std::string>>& rows) {
+    if (g_json.load()) return;
     std::size_t key_width = 0;
     for (const auto& [k, _] : rows) key_width = std::max(key_width, display_width(k));
     std::lock_guard<std::mutex> lock(g_out_mutex);
@@ -529,6 +581,7 @@ void kv_table(const std::vector<std::pair<std::string, std::string>>& rows) {
 
 void table(const std::vector<std::string>& headers,
            const std::vector<std::vector<std::string>>& rows) {
+    if (g_json.load()) return;
     std::vector<std::size_t> widths(headers.size(), 0);
     for (std::size_t i = 0; i < headers.size(); ++i) widths[i] = display_width(headers[i]);
     for (const auto& row : rows) {
@@ -560,6 +613,7 @@ void table(const std::vector<std::string>& headers,
 // ---------------------------------------------------------------------------
 Spinner::Spinner(std::string label) : label_(std::move(label)) {
     init();
+    if (g_json.load()) return;
     if (g_agent.load()) {
         std::lock_guard<std::mutex> lock(g_out_mutex);
         std::cout << "STEP  " << label_ << '\n' << std::flush;
@@ -592,6 +646,7 @@ void Spinner::update(const std::string& label) {
 void Spinner::stop(bool ok, const std::string& final_text) {
     if (!active_) return;
     active_ = false;
+    if (g_json.load()) return;
     std::lock_guard<std::mutex> lock(g_out_mutex);
     if (g_agent.load()) {
         std::cout << (ok ? "OK    " : "ERROR ") << (final_text.empty() ? label_ : final_text)
@@ -609,6 +664,13 @@ void Spinner::stop(bool ok, const std::string& final_text) {
 // StagePrinter
 // ---------------------------------------------------------------------------
 void StagePrinter::begin(const std::string& stage) {
+    if (g_json.load()) {
+        // JSON 模式不输出阶段行，但仍要维护状态，便于 finish() 收尾
+        current_ = stage;
+        started_ = std::chrono::steady_clock::now();
+        active_ = true;
+        return;
+    }
     if (g_agent.load()) {
         if (active_) {
             const double secs =
@@ -653,6 +715,10 @@ void StagePrinter::begin(const std::string& stage) {
 
 void StagePrinter::finish() {
     if (!active_) return;
+    if (g_json.load()) {
+        active_ = false;
+        return;
+    }
     if (g_agent.load()) {
         const double secs =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
@@ -680,6 +746,7 @@ ProgressBar::ProgressBar(std::string label) : label_(std::move(label)) {
 ProgressBar::~ProgressBar() { finish(); }
 
 void ProgressBar::begin(std::int64_t total_bytes) {
+    if (g_json.load()) return;
     total_ = total_bytes;
     done_ = 0;
     last_done_ = -1;

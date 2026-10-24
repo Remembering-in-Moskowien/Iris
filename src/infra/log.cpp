@@ -56,7 +56,8 @@ private:
 void init_logger(bool verbose) {
     iris::ui::init();
 
-    auto sink = std::make_shared<IrisSink>(false);
+    // JSON 模式下 stdout 只放结果文档，日志改走 stderr
+    auto sink = std::make_shared<IrisSink>(iris::ui::json_mode());
     sink->set_agent(iris::ui::agent_mode());
     auto logger = std::make_shared<spdlog::logger>("iris", sink);
     // agent 模式：无时间戳、无颜色，固定 "LEVEL message"（便于 LLM/脚本解析）
