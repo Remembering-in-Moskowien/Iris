@@ -24,6 +24,11 @@ bool Transcribe::execute(core::PipelineContext& ctx) {
         return false;
     }
 
+    if (punctuator_ && punctuator_->is_open()) {
+        for (auto& s : sentences) s.text = punctuator_->punctuate(s.text);
+        spdlog::info("transcribe: 标点恢复完成");
+    }
+
     model::Track t;
     t.type = "transcribe";
     t.language = ctx.doc->config.language;

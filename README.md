@@ -247,7 +247,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 
 | 命令 | 用途 | 状态 |
 |---|---|---|
-| `asr` | 媒体 → IR（ffmpeg 转换 → 预处理 → 进程内 ASR 推理 → 分句；`--separate` 先分人声、`--diarize` 再分说话人） | ✅ 已迁移 |
+| `asr` | 媒体 → IR（ffmpeg 转换 → 预处理 → 进程内 ASR 推理 → 分句；`--separate` 分人声、`--punc` 补标点、`--diarize` 分说话人） | ✅ 已迁移 |
 | `build` | IR → ASS / SRT / TXT | ✅ 已迁移 |
 | `validate` | IR 结构校验 | ✅ 已迁移 |
 | `doctor` | 环境诊断（ffmpeg / ASR / TTS 后端 / 配置） | ✅ 已迁移 |
@@ -259,7 +259,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | `init` | 交互式设置 | 🚧 待迁移 |
 | `convert` / `combine` | 字幕文件 → IR | 🚧 待迁移 |
 | `ocr` / `from-script` | OCR / 剧本导入 | 🚧 待迁移 |
-| `correct` | 时间轴与文本校准 | 🚧 待迁移 |
+| `correct` | IR 文本/时间码校正（空白、重复标点、空句、反序与重叠） | ✅ 已迁移 |
 | `translate` | 机器翻译（dub 现已能用译文轨道配音） | 🚧 待迁移 |
 | `quality` / `pipeline-graph` | QA 与 IR 工具 | 🚧 待迁移 |
 | `serve` | REST API | 🚧 待迁移 |

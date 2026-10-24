@@ -9,9 +9,21 @@
 #include <CLI/CLI.hpp>
 
 #include "iris/controller/commands.hpp"
+#include "iris/text/punctuate.hpp"
 #include "iris/infra/log.hpp"
 
 namespace iris::cli {
+
+namespace {
+
+/// --punc-model=auto 时优先用本机已有的 GGUF，找不到再交给库自己下载。
+std::string resolve_punc_model(const std::string& requested) {
+    if (!requested.empty() && requested != "auto") return requested;
+    const std::string local = iris::text::default_punc_model();
+    return local.empty() ? std::string("auto") : local;
+}
+
+} // namespace
 
 int run(int argc, char** argv) {
     CLI::App app{"iris — speech in, subtitles out (C++ migration of Centurion)"};
@@ -34,6 +46,8 @@ int run(int argc, char** argv) {
     int asr_speakers = 0;
     int asr_diarize_method = 4;
     int asr_threads = 0;
+    bool asr_punc = false;
+    std::string asr_punc_model = "auto";
     bool asr_separate = false;
     std::string asr_separation_model;
     int asr_sep_chunk = 16;
@@ -43,6 +57,10 @@ int run(int argc, char** argv) {
                     "Speaker embedding GGUF for --diarize (default: ~/.cache/crispasr/wespeaker*.gguf)");
     asr->add_option("--speakers", asr_speakers,
                     "Exact number of speakers for --diarize (0 = auto 1..8)");
+    asr->add_flag("--punc", asr_punc, "Restore punctuation on the transcript (FireRedPunc/PCS)");
+    asr->add_option("--punc-model", asr_punc_model,
+                    "Punctuation model: alias (auto|firered|fullstop|punctuate-all|pcs) or .gguf")
+        ->capture_default_str();
     asr->add_flag("--separate", asr_separate,
                   "Separate the vocal stem before transcription (HTDemucs)");
     asr->add_option("--separation-chunk", asr_sep_chunk,
@@ -179,6 +197,13 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- correct ----
+    auto* correct = app.add_subcommand(
+        "correct", "Clean up an IR: whitespace, punctuation, empty cues, timings/overlaps");
+    std::string correct_ir, correct_out;
+    correct->add_option("ir", correct_ir, "IR file (*.iris.json)")->required();
+    correct->add_option("--out,-o", correct_out, "Output IR path (default: in place)");
+
     // ---- init ----
     app.add_subcommand("init", "Interactive setup (stub, planned)");
 
@@ -203,7 +228,8 @@ int run(int argc, char** argv) {
         }
         if (!asr_diarize) {
             return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output,
-                                      nullptr, asr_threads, separate_ptr);
+                                      nullptr, asr_threads, separate_ptr,
+                                      asr_punc ? resolve_punc_model(asr_punc_model) : std::string());
         }
         asr::DiarizeOptions diarize;
         diarize.method = asr_diarize_method;
@@ -232,7 +258,8 @@ int run(int argc, char** argv) {
             separate_ptr = &separate_opts;
         }
         return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output, &diarize,
-                                   asr_threads, separate_ptr);
+                                   asr_threads, separate_ptr,
+                                   asr_punc ? resolve_punc_model(asr_punc_model) : std::string());
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
@@ -255,6 +282,7 @@ int run(int argc, char** argv) {
         return controller::run_dub(dub_opts);
     }
     if (translate->parsed()) return controller::run_translate(translate_opts);
+    if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << _("init: interactive setup coming soon\n", "init: 交互式设置将在后续版本实现\n");

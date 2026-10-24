@@ -10,6 +10,7 @@
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/ops/sentence_split.hpp"
+#include "iris/text/cleanup.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/mt/translator.hpp"
 #include "iris/tts/gguf.hpp"
@@ -460,6 +461,51 @@ TEST_CASE("sentence split keeps UTF-8 characters intact", "[split]") {
         REQUIRE(sentence.text.size() % 3 == 0);
         REQUIRE(sentence.text.find("\xEF\xBF\xBD") == std::string::npos);
     }
+}
+
+TEST_CASE("correction: text cleanup and timing repair", "[correct]") {
+    using iris::text::CleanupReport;
+    using iris::text::clean_sentences;
+    using iris::text::clean_text;
+
+    // 空白 + 重复标点 + 半角标点
+    REQUIRE(clean_text("  所以 我的 同胞们 ，，不要问  ") == "所以我的同胞们，不要问");
+    REQUIRE(clean_text("你好。。。") == "你好。");
+    REQUIRE(clean_text("等等！！？") == "等等？"); // 句末标点优先
+    // 数字里的逗号/冒号保持半角
+    REQUIRE(clean_text("1,000 和 12:30") == "1,000 和 12:30");
+
+    // 时间码修正 / 重叠消解 / 空句丢弃
+    std::vector<iris::model::Sentence> sents;
+    {
+        iris::model::Sentence s;
+        s.start_ms = 0;
+        s.end_ms = 1000;
+        s.text = "  你好  ";
+        sents.push_back(s);
+        s.start_ms = 900; // 与上一句重叠
+        s.end_ms = 2000;
+        s.text = "重叠";
+        sents.push_back(s);
+        s.start_ms = 3000;
+        s.end_ms = 3000; // 零长度
+        s.text = "零长度";
+        sents.push_back(s);
+        s.start_ms = 4000;
+        s.end_ms = 4100;
+        s.text = "   "; // 清理后为空
+        sents.push_back(s);
+    }
+
+    CleanupReport report;
+    clean_sentences(sents, report);
+    REQUIRE(sents.size() == 3);
+    REQUIRE(sents[0].text == "你好");
+    REQUIRE(sents[1].start_ms == 1000);
+    REQUIRE(sents[2].end_ms == 3001);
+    REQUIRE(report.dropped == 1);
+    REQUIRE(report.timing_fixed == 1);
+    REQUIRE(report.overlap_fixed == 1);
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {

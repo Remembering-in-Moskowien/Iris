@@ -55,6 +55,8 @@ add_library(iris_core
     src/ops/translate.cpp
     src/ops/diarize.cpp
     src/ops/vocal_separate.cpp
+    src/text/punctuate.cpp
+    src/text/cleanup.cpp
     src/asr/asr.cpp
     src/asr/ct2_mel.cpp
     src/asr/onnx.cpp
@@ -117,7 +119,8 @@ add_executable(iris
     src/controller/tts_command.cpp
     src/controller/emotion_command.cpp
     src/controller/dub_command.cpp
-    src/controller/translate_command.cpp)
+    src/controller/translate_command.cpp
+    src/controller/correct_command.cpp)
 target_link_libraries(iris PRIVATE iris_core CLI11::CLI11)
 target_compile_options(iris PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 set_target_properties(iris PROPERTIES

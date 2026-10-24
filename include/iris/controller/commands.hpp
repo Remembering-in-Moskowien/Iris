@@ -22,7 +22,8 @@ inline constexpr const char* kVersion = IRIS_VERSION_STRING;
 int run_asr(const std::string& input, const std::string& language, const std::string& engine,
             const std::string& model, const std::string& output,
             const asr::DiarizeOptions* diarize = nullptr, int n_threads = 0,
-            const asr::SeparateOptions* separate = nullptr);
+            const asr::SeparateOptions* separate = nullptr,
+            const std::string& punc_model = {});
 
 /// build：IR → ASS/SRT/TXT（View 层渲染）。
 int run_build(const std::string& ir_path, const std::string& format, const std::string& output);
@@ -102,6 +103,9 @@ struct TranslateCommandOptions {
 
 /// translate：机器翻译（非 LLM：OPUS-MT/Marian、M2M100）。
 int run_translate(const TranslateCommandOptions& opts);
+
+/// correct：IR 文本/时间码校正（空白、标点、空句、反序与重叠时间码）。
+int run_correct(const std::string& ir_path, const std::string& out_path);
 
 /// emotion：语音情感分析（A/D/V 三维，Wav2Small ONNX）。
 int run_emotion(const std::string& onnx_path, const std::string& wav_path);

@@ -37,7 +37,7 @@ C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命�
 | 配音合成 | `TtsSynthesisOperator` + IndexTTS/Qora/LlamaTTS provider | `ops/dub_tts.cpp` + qwen3-tts | ✅ |
 | 时间对齐 | `AlignmentOperator`、`TimeAlignmentOperator`、`AlignmentTempo`、`CrispAsrAlignmentStrategy` | WSOLA 压时隙 + 顺延（近似） | 🟡 |
 | 混音/封装 | `AudioMixOperator`（dub → `*.dub.wav`，不封装回视频） | 内联混音 → WAV | ✅ |
-| 校正 | `SpellCheckOperator`、`SubtitleTextCorrectorOperator`、`OverlapResolutionOperator`、`SubtitleTrackCheckerOperator`、`CorrectionReportOperator`、`TextPreprocessingOperator` | 无 | ❌ |
+| 校正 | `SpellCheckOperator`、`SubtitleTextCorrectorOperator`、`OverlapResolutionOperator`、`SubtitleTrackCheckerOperator`、`CorrectionReportOperator`、`TextPreprocessingOperator` | ✅ `correct` 命令 + [text/cleanup.cpp](src/text/cleanup.cpp)：空白/重复标点/空句/反序时间码/重叠消解（缺拼写检查与 LLM 校正） | 🟡 |
 | OCR | `OcrExtractOperator`、`Ocr/OcrClientProvider` | 无 | ❌ |
 | 剧本导入 | `ScriptLoaderOperator`、`ScriptTimelineMapperOperator`、`BilingualSubtitleParserOperator` | 无 | ❌ |
 | 字幕导入 | `ConvertParseOperator`、`CombineParse/Merge/Dedupe` | 无（只有 IR → 字幕，没有字幕 → IR） | ❌ |
@@ -90,9 +90,10 @@ C# `Centurion.Models` 里 iris 目前缺的字段：
 | **P0** | **说话人分割** | 运行时 API + 模型 + IR 字段全就绪；直接决定多音色配音与字幕标注 | ✅ 已接（`asr --diarize`） |
 | **P0** | **人声分离**（HTDemucs） | `State.vocals_path` 字段已存在；配音/转写质量的上游开关 | ✅ 已接（`asr --separate`），但 CPU 上 ~19× 实时，慎用 |
 | P0 | 推理线程数修复 | 默认 `hardware_concurrency` 在混合架构 CPU 上比 8 线程慢 70–100 倍 | ✅ 已修（whisper-tiny 82.7 s → 1.08 s） |
-| P1 | 校正链（拼写、重叠消解、轨道自检） | 长视频字幕质量的刚需；纯文本逻辑，无模型依赖 | ⏳ 待做 |
+| P1 | 校正链（拼写、重叠消解、轨道自检） | 长视频字幕质量的刚需；纯文本逻辑，无模型依赖 | 🟡 文本/时间码校正已做，拼写检查待补 |
 | P1 | 字幕导入（convert/combine）+ 剧本导入（from-script） | iris 目前只能「媒体→IR」，缺「已有字幕→IR」入口 | ⏳ 待做 |
 | P1 | OCR（VideoSubFinder 取帧 + OCR provider） | 硬字幕视频的入口；`vsf` 已实现取帧部分 | ⏳ 待做 |
+| P1 | 标点恢复 | 中文 ASR（Paraformer/SenseVoice）默认不带标点 | ✅ `asr --punc`（FireRedPunc） |
 | P1 | dub 接入说话人（多音色） | 分割标签已有，差「按 speaker 选音色」 | ⏳ 待做 |
 | P2 | 质量报告（Quality* + HTML） | 依赖校正/对齐数据先齐 | ⏳ 待做 |
 | P2 | LLM 翻译/分句、云 provider、REST、`migrate`、`update` | 依赖模型与密钥体系 | ⏳ 待做 |
