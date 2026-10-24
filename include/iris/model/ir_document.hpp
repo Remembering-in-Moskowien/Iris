@@ -105,11 +105,13 @@ struct WorkflowState {
     std::optional<std::string> converted_audio_path;
     std::optional<std::string> preprocessed_audio_path;
     std::optional<std::string> vocals_path;
+    std::optional<std::string> dubbed_audio_path; ///< dub 链路的配音音轨（WAV）
     std::vector<Track> tracks;
 
     bool is_audio_converted = false;
     bool is_vocals_separated = false;
     bool is_transcribed = false;
+    bool is_dubbed = false;
 
     /// 序列化为 nlohmann::json。
     [[nodiscard]] nlohmann::json to_json() const;

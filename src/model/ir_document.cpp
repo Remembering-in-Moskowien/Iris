@@ -168,11 +168,13 @@ Track Track::from_json(const nlohmann::json& j) {
 nlohmann::json WorkflowState::to_json() const {
     nlohmann::json j = {{"isAudioConverted", is_audio_converted},
                         {"isVocalsSeparated", is_vocals_separated},
-                        {"isTranscribed", is_transcribed}};
+                        {"isTranscribed", is_transcribed},
+                        {"isDubbed", is_dubbed}};
     if (pipeline_temp_directory) j["pipelineTempDirectory"] = *pipeline_temp_directory;
     if (converted_audio_path) j["convertedAudioPath"] = *converted_audio_path;
     if (preprocessed_audio_path) j["preprocessedAudioPath"] = *preprocessed_audio_path;
     if (vocals_path) j["vocalsPath"] = *vocals_path;
+    if (dubbed_audio_path) j["dubbedAudioPath"] = *dubbed_audio_path;
     if (!tracks.empty()) {
         j["tracks"] = nlohmann::json::array();
         for (const auto& t : tracks) j["tracks"].push_back(t.to_json());
@@ -186,12 +188,14 @@ WorkflowState WorkflowState::from_json(const nlohmann::json& j) {
     set_opt(j, "convertedAudioPath", st.converted_audio_path);
     set_opt(j, "preprocessedAudioPath", st.preprocessed_audio_path);
     set_opt(j, "vocalsPath", st.vocals_path);
+    set_opt(j, "dubbedAudioPath", st.dubbed_audio_path);
     if (j.contains("tracks") && j["tracks"].is_array()) {
         for (const auto& t : j["tracks"]) st.tracks.push_back(Track::from_json(t));
     }
     st.is_audio_converted = j.value("isAudioConverted", false);
     st.is_vocals_separated = j.value("isVocalsSeparated", false);
     st.is_transcribed = j.value("isTranscribed", false);
+    st.is_dubbed = j.value("isDubbed", false);
     return st;
 }
 

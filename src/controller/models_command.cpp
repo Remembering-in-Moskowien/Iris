@@ -15,6 +15,8 @@ int run_models_list() {
     registry.register_provider({"asr-engine (whisper-ct2)", "asr", "local", {core::Capability::Asr}});
     registry.register_provider({"demucs", "vocal-separation", "local", {core::Capability::VocalSeparation}});
     registry.register_provider({"qwen3-tts", "tts", "local", {core::Capability::Tts}});
+    registry.register_provider({"indextts", "tts", "local", {core::Capability::Tts}});
+    registry.register_provider({"wav2vec2-emotion", "emotion", "local", {core::Capability::Emotion}});
 
     std::cout << _("Registered providers:\n", "已注册提供者:\n");
     for (const auto& p : registry.all()) {

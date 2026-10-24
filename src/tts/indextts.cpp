@@ -1,9 +1,8 @@
 // ============================================================================
-// IndexTTS 2.5 ONNX 完整编排 —— 推理代码全部由 Iris 自写，运行时引用打包好的
+// IndexTTS 2.5 ONNX 编排（实验性）。推理代码由 Iris 自写，运行时引用打包好的
 // onnxruntime DLL（tools/runtimes/onnx，gitignored，不内嵌源码）。
 //
 // 流水线（mirrors index_tts_2_5_onnx/core/pipeline.py）：
-//
 //   build_speaker(ref.wav):
 //     audio_22k/16k → w2v-bert features → semantic_model.onnx → spk_cond_emb
 //     emo_vec.onnx(spk_cond_emb) → emovec
@@ -12,16 +11,17 @@
 //     conds = concat([(spk_cond+emovec), 0, 0])
 //     ref_mel = mel_spectrogram(audio_22k)
 //     prompt_condition = length_regulator(spk_cond_emb, ref_mel_len)
-//
 //   synthesize(text):
-//     frontend tokenize → gpt_prefill.onnx → gpt_step.onnx (自回归采样)
+//     frontend tokenize → gpt_prefill.onnx → gpt_step.onnx（自回归采样）
 //     → semantic_codec_decode.onnx → length_regulator.onnx
-//     → cfm_estimator.onnx (Euler ODE + CFG) → bigvgan.onnx → 22050Hz WAV
+//     → cfm_estimator.onnx（Euler ODE + CFG）→ bigvgan.onnx → 22050 Hz WAV
+//
+// 现状：9 个 ONNX session 的加载与模型目录校验已完成；w2v-bert 特征、tiktoken
+// 前端、GPT 自回归与 CFM solver 仍未接通，因此 synth_indextts 目前一律返回
+// 明确的「编排未完成」错误。可用引擎见 qwen3-tts（CrispASR，已端到端可用）。
 //
 // GPU 可行：构建期定义 IRIS_ONNX_CUDA 时注册 CUDA EP（无 GPU 自动回落 CPU EP）。
 // ============================================================================
-
-#include "iris/tts/indextts.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -29,11 +29,11 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <random>
 #include <string>
 #include <vector>
 
 #include "iris/infra/log.hpp"
+#include "iris/tts/tts.hpp"
 
 #if IRIS_HAS_ONNX
 #include <onnxruntime_cxx_api.h>
@@ -45,12 +45,7 @@ namespace iris::tts {
 #if IRIS_HAS_ONNX
 namespace {
 
-constexpr int kSamplingRate = 22050;
-constexpr int kMaxRefSeconds = 15;
-constexpr int kNMelBins = 80;
-constexpr int kNFFT = 1024;
-constexpr int kHopSize = 256;
-constexpr int kWinSize = 1024;
+constexpr int kIndexTtsRate = 22050;
 
 // ---------------------------------------------------------------------------
 // ONNX session 封装
@@ -79,186 +74,81 @@ OrtSession make_session(Ort::Env& env, const std::string& path, int threads = 4)
     return s;
 }
 
-// ---------------------------------------------------------------------------
-// WAV 读取（16-bit PCM → float32 [-1,1]）
-// ---------------------------------------------------------------------------
-bool read_wav_float(const std::string& path, std::vector<float>& out, int& sr) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return false;
-    char riff[4]; f.read(riff, 4);
-    if (std::memcmp(riff, "RIFF", 4) != 0) return false;
-    f.seekg(4, std::ios::cur);
-    char wave[4]; f.read(wave, 4);
-    if (std::memcmp(wave, "WAVE", 4) != 0) return false;
-    int16_t channels = 0, bps = 0;
-    uint32_t sample_rate = 0;
-    std::vector<char> data;
-    while (f) {
-        char cid[4]; uint32_t sz = 0;
-        if (!f.read(cid, 4)) break;
-        f.read(reinterpret_cast<char*>(&sz), 4);
-        if (std::memcmp(cid, "fmt ", 4) == 0) {
-            char fmt[16]; f.read(fmt, 16);
-            std::memcpy(&channels, fmt + 2, 2);
-            std::memcpy(&sample_rate, fmt + 4, 4);
-            std::memcpy(&bps, fmt + 14, 2);
-            if (sz > 16) f.seekg(sz - 16, std::ios::cur);
-        } else if (std::memcmp(cid, "data", 4) == 0) {
-            data.resize(sz);
-            f.read(data.data(), sz);
-            break;
-        } else {
-            f.seekg(sz, std::ios::cur);
-            if (sz & 1) f.seekg(1, std::ios::cur);
-        }
+/// 模型目录必需的 ONNX 图（IndexTTS 2.5 onnx 权重布局）。
+constexpr const char* kRequiredFiles[] = {
+    "campplus.onnx", "emo_vec.onnx", "length_regulator.onnx",
+    "semantic_codec_decode.onnx", "bigvgan.onnx", "spk_proj.npz",
+    "gpt_prefill/gpt_prefill.onnx", "gpt_step/gpt_step.onnx",
+    "cfm_estimator/cfm_estimator.onnx", "semantic_model/semantic_model.onnx",
+};
+
+/// 校验模型目录，返回第一个缺失文件的相对路径（全部齐备返回空串）。
+std::string first_missing(const std::string& model_dir) {
+    namespace fs = std::filesystem;
+    for (const char* f : kRequiredFiles) {
+        if (!fs::exists(fs::path(model_dir) / f)) return f;
     }
-    if (bps != 16) return false;
-    const int16_t* s16 = reinterpret_cast<const int16_t*>(data.data());
-    size_t n = data.size() / 2;
-    out.resize(n);
-    for (size_t i = 0; i < n; ++i) out[i] = s16[i] / 32768.0f;
-    sr = sample_rate;
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// WAV 写出（float32 → 16-bit PCM）
-// ---------------------------------------------------------------------------
-bool write_wav_float(const std::string& path, const std::vector<float>& in, int sr) {
-    std::ofstream f(path, std::ios::binary);
-    if (!f) return false;
-    int16_t channels = 1, bps = 16;
-    uint32_t data_size = static_cast<uint32_t>(in.size() * 2);
-    f.write("RIFF", 4);
-    uint32_t chunk_size = 36 + data_size;
-    f.write(reinterpret_cast<char*>(&chunk_size), 4);
-    f.write("WAVE", 4);
-    f.write("fmt ", 4);
-    uint32_t fmt_size = 16;
-    f.write(reinterpret_cast<char*>(&fmt_size), 4);
-    int16_t audio_fmt = 1;
-    f.write(reinterpret_cast<char*>(&audio_fmt), 2);
-    f.write(reinterpret_cast<char*>(&channels), 2);
-    f.write(reinterpret_cast<char*>(&sr), 4);
-    uint32_t byte_rate = sr * channels * bps / 8;
-    f.write(reinterpret_cast<char*>(&byte_rate), 4);
-    int16_t block_align = channels * bps / 8;
-    f.write(reinterpret_cast<char*>(&block_align), 2);
-    f.write(reinterpret_cast<char*>(&bps), 2);
-    f.write("data", 4);
-    f.write(reinterpret_cast<char*>(&data_size), 4);
-    for (float v : in) {
-        int16_t s = static_cast<int16_t>(std::max(-32767.0f, std::min(32767.0f, v * 32767.0f)));
-        f.write(reinterpret_cast<char*>(&s), 2);
-    }
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// tiktoken BPE（简化：UTF-8 字节级编码）
-// ---------------------------------------------------------------------------
-std::vector<int64_t> simple_tokenize(const std::string& text) {
-    std::vector<int64_t> ids;
-    for (unsigned char c : text) ids.push_back(c);
-    return ids;
-}
-
-// ---------------------------------------------------------------------------
-// ONNX Run 辅助：单输入单输出
-// ---------------------------------------------------------------------------
-template <typename T>
-std::vector<T> run_single(OrtSession& sess, const char* in_name, std::vector<T>& in_data,
-                          const std::vector<int64_t>& in_shape) {
-    Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    Ort::Value in = Ort::Value::CreateTensor<T>(mem, in_data.data(), in_data.size(),
-                                                in_shape.data(), in_shape.size());
-    const char* in_names[1] = {in_name};
-    const char* out_names[1] = {sess.out_names[0].c_str()};
-    auto outs = sess.sess->Run(Ort::RunOptions{}, in_names, &in, 1, out_names, 1);
-    T* ptr = outs[0].GetTensorMutableData<T>();
-    auto info = outs[0].GetTensorTypeAndShapeInfo();
-    auto dims = info.GetShape();
-    size_t total = 1;
-    for (auto d : dims) total *= (d > 0 ? static_cast<size_t>(d) : 1);
-    return std::vector<T>(ptr, ptr + total);
+    return {};
 }
 
 } // namespace
 #endif
 
-bool synth_indextts(const std::string& model_dir,
-                    const std::string& text,
-                    const std::string& ref_wav,
-                    const std::string& out_wav,
-                    std::string& error) {
+bool synth_indextts(const TtsRequest& req, TtsResult& out, std::string& error) {
+    (void)out;
 #if !IRIS_HAS_ONNX
-    error = "Iris 未以 ONNX 运行时构建";
+    (void)req;
+    error = "indextts: Iris 未以 onnxruntime 构建（tools/runtimes/onnx 缺失）";
     return false;
 #else
     namespace fs = std::filesystem;
 
-    // 1. 模型文件检查
-    const std::vector<std::string> required = {
-        "campplus.onnx", "emo_vec.onnx", "length_regulator.onnx",
-        "semantic_codec_decode.onnx", "bigvgan.onnx", "spk_proj.npz",
-        "gpt_prefill/gpt_prefill.onnx", "gpt_step/gpt_step.onnx",
-        "cfm_estimator/cfm_estimator.onnx", "semantic_model/semantic_model.onnx"
-    };
-    for (const auto& f : required) {
-        if (!fs::exists(fs::path(model_dir) / f)) {
-            error = fmt::format("IndexTTS 模型缺失：{}/{}", model_dir, f);
+    if (req.model.empty() || !fs::is_directory(req.model)) {
+        error = "indextts: --model 需要 IndexTTS ONNX 模型目录: " + req.model;
+        return false;
+    }
+    if (const std::string missing = first_missing(req.model); !missing.empty()) {
+        error = fmt::format("indextts: 模型缺少 {}/{}", req.model, missing);
+        return false;
+    }
+
+    // 参考音频（音色克隆）。IndexTTS 要求 22050 Hz；此处只做可读性检查，
+    // 特征提取接通后再校验采样率。
+    if (!req.ref_wav.empty()) {
+        std::vector<float> ref;
+        int ref_rate = 0;
+        std::string wav_err;
+        if (!read_wav(req.ref_wav, ref, ref_rate, wav_err)) {
+            error = "indextts: 参考音频无效：" + wav_err;
             return false;
         }
+        spdlog::info("indextts: 参考音频 {} 采样 @ {} Hz（目标 {} Hz）", ref.size(), ref_rate,
+                     kIndexTtsRate);
     }
 
-    // 2. 加载参考音频
-    std::vector<float> audio_22k;
-    int sr = 0;
-    if (!read_wav_float(ref_wav, audio_22k, sr)) {
-        error = "无法读取参考音频：" + ref_wav;
-        return false;
-    }
-    audio_22k.resize(std::min(audio_22k.size(),
-                               static_cast<size_t>(kMaxRefSeconds * kSamplingRate)));
-    spdlog::info("tts: 参考音频 {} samples @ {} Hz", audio_22k.size(), sr);
-
-    // 3. ONNX 环境 + 9 个 session 加载
-    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "iris-tts");
+    Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "iris-indextts");
     try {
-        auto campplus = make_session(env, model_dir + "/campplus.onnx");
-        auto emo_vec = make_session(env, model_dir + "/emo_vec.onnx");
-        auto len_reg = make_session(env, model_dir + "/length_regulator.onnx");
-        auto codec = make_session(env, model_dir + "/semantic_codec_decode.onnx");
-        auto bigvgan = make_session(env, model_dir + "/bigvgan.onnx");
-        auto gpt_pre = make_session(env, model_dir + "/gpt_prefill/gpt_prefill.onnx");
-        auto gpt_step = make_session(env, model_dir + "/gpt_step/gpt_step.onnx");
-        auto cfm = make_session(env, model_dir + "/cfm_estimator/cfm_estimator.onnx");
-        auto semantic = make_session(env, model_dir + "/semantic_model/semantic_model.onnx");
-        spdlog::info("tts: 9 个 ONNX session 全部加载完成");
-
-        // 4. build_speaker（w2v-bert features → semantic_model → emo_vec → campplus → spk_proj）
-        // TODO: w2v-bert feature extraction (SeamlessM4T, 80 mel, stride=2)
-        // TODO: spk_proj.npz 加载 + style @ W.T + B
-        spdlog::warn("tts: build_speaker DSP 待调试（w2v-bert features/spk_proj）");
-
-        // 5. synthesize（tokenize → gpt → codec → len_reg → cfm → bigvgan）
-        auto text_ids = simple_tokenize(text);
-        spdlog::info("tts: 文本 tokenize 完成（{} tokens）", text_ids.size());
-
-        // 6. TODO: gpt prefill/step 自回归采样 + kv cache
-        // TODO: semantic_codec_decode
-        // TODO: length_regulator
-        // TODO: CFM Euler solver (25 steps, CFG)
-        // TODO: bigvgan mel → wav
-        // TODO: write_wav_float(out_wav, wav, 22050)
-
-        error = "IndexTTS 编排框架已就位（9 session 加载 + DSP 骨架）；"
-                "完整 GPT/CFM 编排待模型权重调试";
-        return false;
+        // 9 个 ONNX 图全部加载后再进入编排；加载失败会带上具体文件。
+        auto campplus = make_session(env, req.model + "/campplus.onnx");
+        auto emo_vec = make_session(env, req.model + "/emo_vec.onnx");
+        auto len_reg = make_session(env, req.model + "/length_regulator.onnx");
+        auto codec = make_session(env, req.model + "/semantic_codec_decode.onnx");
+        auto bigvgan = make_session(env, req.model + "/bigvgan.onnx");
+        auto gpt_pre = make_session(env, req.model + "/gpt_prefill/gpt_prefill.onnx");
+        auto gpt_step = make_session(env, req.model + "/gpt_step/gpt_step.onnx");
+        auto cfm = make_session(env, req.model + "/cfm_estimator/cfm_estimator.onnx");
+        auto semantic = make_session(env, req.model + "/semantic_model/semantic_model.onnx");
+        spdlog::info("indextts: 9 个 ONNX session 全部加载完成");
+        (void)campplus; (void)emo_vec; (void)len_reg; (void)codec; (void)bigvgan;
+        (void)gpt_pre; (void)gpt_step; (void)cfm; (void)semantic;
     } catch (const Ort::Exception& e) {
-        error = std::string("ONNX 加载失败：") + e.what();
+        error = std::string("indextts: ONNX 加载失败：") + e.what();
         return false;
     }
+
+    error = "indextts: 编排未完成（缺 w2v-bert 特征 / tiktoken 前端 / GPT 自回归 / "
+            "CFM solver）；请先用 --engine qwen3-tts 跑通配音链路";
+    return false;
 #endif
 }
 

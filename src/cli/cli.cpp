@@ -62,28 +62,66 @@ int run(int argc, char** argv) {
         ->check(CLI::Range(0.1, 10.0));
 
     // ---- tts ----
-    auto* tts = app.add_subcommand("tts", "Text-to-speech (IndexTTS ONNX voice cloning)");
-    std::string tts_engine = "indextts", tts_model, tts_text, tts_ref, tts_out;
-    tts->add_option("--engine", tts_engine, "TTS engine (default indextts)");
-    tts->add_option("--model,-m", tts_model, "Model dir (IndexTTS ONNX weights)")->required();
-    tts->add_option("--text", tts_text, "Text to synthesize")->required();
-    tts->add_option("--ref", tts_ref, "Reference WAV for voice cloning (<=15s)")->required();
-    tts->add_option("--out,-o", tts_out, "Output WAV path");
+    auto* tts = app.add_subcommand("tts", "Text-to-speech (qwen3-tts / indextts)");
+    controller::TtsOptions tts_opts;
+    tts->add_option("--engine", tts_opts.engine, "TTS engine (qwen3-tts | indextts)")
+        ->capture_default_str();
+    tts->add_option("--model,-m", tts_opts.model,
+                    "talker GGUF (qwen3-tts) or ONNX model dir (indextts)")
+        ->required();
+    tts->add_option("--codec", tts_opts.codec,
+                    "12Hz tokenizer/codec GGUF (qwen3-tts; required)");
+    tts->add_option("--text", tts_opts.text, "Text to synthesize");
+    bool tts_inspect = false;
+    tts->add_flag("--inspect", tts_inspect,
+                  "Print the GGUF structure (metadata + tensor groups) and exit");
+    tts->add_option("--ref", tts_opts.ref_wav, "Reference WAV for voice cloning");
+    tts->add_option("--ref-text", tts_opts.ref_text,
+                    "Transcript of --ref (required when cloning from a WAV)");
+    tts->add_option("--lang", tts_opts.language, "Language hint (zh, en, ...)");
+    tts->add_option("--steps", tts_opts.steps, "Sampling steps (0 = backend default)");
+    tts->add_option("--cfg", tts_opts.cfg_scale, "CFG scale (0 = backend default)");
+    tts->add_option("--out,-o", tts_opts.out_wav, "Output WAV path")->capture_default_str();
 
     // ---- emotion ----
-    auto* emo = app.add_subcommand("emotion", "Speech emotion analysis (A/D/V, Wav2Small ONNX)");
+    auto* emo = app.add_subcommand("emotion", "Speech emotion analysis (6-class wav2vec2 ONNX)");
     std::string emo_onnx, emo_wav;
-    emo->add_option("--model", emo_onnx, "Wav2Small ONNX path")->required();
+    emo->add_option("--model", emo_onnx, "Emotion ONNX path")->required();
     emo->add_option("input", emo_wav, "Input 16kHz WAV")->required();
 
     // ---- dub ----
     auto* dub = app.add_subcommand("dub", "Dub pipeline: asr -> emotion -> tts");
-    std::string dub_input, dub_model, dub_emo_onnx, dub_ref, dub_out;
-    dub->add_option("input", dub_input, "Input audio/video");
-    dub->add_option("--model,-m", dub_model, "TTS model dir")->required();
-    dub->add_option("--emotion-model", dub_emo_onnx, "Emotion ONNX path (optional)");
-    dub->add_option("--ref", dub_ref, "Reference WAV for voice cloning");
-    dub->add_option("--out,-o", dub_out, "Output dub WAV");
+    controller::DubOptions dub_opts;
+    dub->add_option("input", dub_opts.input, "Input media file or existing IR (*.json)")
+        ->required();
+    dub->add_option("--engine", dub_opts.engine, "TTS engine (qwen3-tts | indextts)")
+        ->capture_default_str();
+    dub->add_option("--model,-m", dub_opts.model,
+                    "TTS model: talker GGUF (qwen3-tts) or ONNX dir (indextts)")
+        ->required();
+    dub->add_option("--codec", dub_opts.codec, "12Hz tokenizer/codec GGUF (qwen3-tts; required)");
+    dub->add_option("--ref", dub_opts.ref_wav, "Reference WAV for voice cloning");
+    dub->add_option("--ref-text", dub_opts.ref_text,
+                    "Transcript of --ref (required when cloning from a WAV)");
+    dub->add_option("--language,-l", dub_opts.language, "Language code (e.g. en, zh)")
+        ->capture_default_str();
+    dub->add_option("--asr-engine", dub_opts.asr_engine,
+                    "ASR engine (whisper | qwen3-asr | whisper-ct2)")
+        ->capture_default_str();
+    dub->add_option("--asr-model", dub_opts.asr_model, "ASR model (required for media input)");
+    dub->add_option("--emotion-model", dub_opts.emotion_model, "Emotion ONNX path (optional)");
+    dub->add_option("--out,-o", dub_opts.out_wav, "Output dub WAV path")->capture_default_str();
+    dub->add_option("--ir-out", dub_opts.ir_out, "Also save the IR to this path");
+    dub->add_option("--steps", dub_opts.steps, "TTS sampling steps (0 = backend default)");
+    dub->add_option("--cfg", dub_opts.cfg_scale, "TTS CFG scale (0 = backend default)");
+    dub->add_option("--gap-ms", dub_opts.gap_ms,
+                    "Minimum pause kept between cues (ms)")
+        ->capture_default_str();
+    dub->add_option("--max-speed", dub_opts.max_speed,
+                    "Max time-compression factor when fitting a cue to its slot")
+        ->capture_default_str();
+    bool no_fit = false;
+    dub->add_flag("--no-fit", no_fit, "Disable fitting cues to the original timing");
 
     // ---- init ----
     app.add_subcommand("init", "Interactive setup (stub, planned)");
@@ -105,9 +143,15 @@ int run(int argc, char** argv) {
         }
         return controller::run_vsf(vsf_input, vsf_output, rx, ry, rw, rh, vsf_fps);
     }
-    if (tts->parsed()) return controller::run_tts(tts_engine, tts_model, tts_text, tts_ref, tts_out);
+    if (tts->parsed()) {
+        if (tts_inspect) return controller::run_tts_inspect(tts_opts.model);
+        return controller::run_tts(tts_opts);
+    }
     if (emo->parsed()) return controller::run_emotion(emo_onnx, emo_wav);
-    if (dub->parsed()) return controller::run_dub(dub_input, dub_model, dub_emo_onnx, dub_ref, dub_out);
+    if (dub->parsed()) {
+        dub_opts.fit_timing = !no_fit;
+        return controller::run_dub(dub_opts);
+    }
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << _("init: interactive setup coming soon\n", "init: 交互式设置将在后续版本实现\n");

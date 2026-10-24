@@ -24,7 +24,7 @@ int run_build(const std::string& ir_path, const std::string& format, const std::
 /// validate：校验 IR 文件。
 int run_validate(const std::string& ir_path);
 
-/// doctor：环境诊断（外部媒体工具 + 内嵌 ASR 后端可用性）。
+/// doctor：环境诊断（外部媒体工具 + 内嵌 ASR/TTS 后端可用性）。
 int run_doctor();
 
 /// models list：列出已注册提供者。
@@ -34,17 +34,51 @@ int run_models_list();
 int run_vsf(const std::string& input, const std::string& output,
              int roi_x, int roi_y, int roi_w, int roi_h, double sample_fps);
 
-/// tts：文本 → 语音（IndexTTS ONNX 引擎，音色克隆）。
-int run_tts(const std::string& engine, const std::string& model_dir,
-            const std::string& text, const std::string& ref_wav,
-            const std::string& out_wav);
+/// tts 命令参数（文本 → 语音；引擎无关）。
+struct TtsOptions {
+    std::string engine = "qwen3-tts";
+    std::string model;  ///< qwen3-tts: talker GGUF；indextts: ONNX 模型目录
+    std::string codec;  ///< qwen3-tts 必需的 tokenizer/codec GGUF
+    std::string text;
+    std::string ref_wav;
+    std::string ref_text;
+    std::string language;
+    std::string out_wav = "tts.wav";
+    int steps = 0;
+    float cfg_scale = 0.0f;
+};
+
+/// tts：文本 → 语音（qwen3-tts / indextts）。
+int run_tts(const TtsOptions& opts);
+
+/// tts --inspect：用自研 GGUF 解析器打印模型结构（元数据 + 张量分组），不合成。
+int run_tts_inspect(const std::string& model_path);
+
+/// dub 命令参数（媒体/IR → 转写/情感 → 逐句 TTS → 配音音轨）。
+struct DubOptions {
+    std::string input;
+    std::string engine = "qwen3-tts";
+    std::string model;
+    std::string codec;
+    std::string ref_wav;
+    std::string ref_text;
+    std::string language = "en";
+    std::string asr_engine = "whisper";
+    std::string asr_model;
+    std::string emotion_model;
+    std::string out_wav = "dub.wav";
+    std::string ir_out; ///< 非空则把本次 IR 另存一份
+    int steps = 0;
+    float cfg_scale = 0.0f;
+    bool fit_timing = true; ///< 按原句时隙对齐时长（--no-fit 关闭）
+    int gap_ms = 200;       ///< 句间最小停顿
+    float max_speed = 1.2f; ///< 时长压缩的变速上限
+};
+
+/// dub：配音线路串联（asr → emotion → tts）。
+int run_dub(const DubOptions& opts);
 
 /// emotion：语音情感分析（A/D/V 三维，Wav2Small ONNX）。
 int run_emotion(const std::string& onnx_path, const std::string& wav_path);
-
-/// dub：配音线路串联（asr → emotion → tts）。
-int run_dub(const std::string& input, const std::string& model_dir,
-            const std::string& onnx_emotion, const std::string& ref_wav,
-            const std::string& out_wav);
 
 } // namespace iris::controller

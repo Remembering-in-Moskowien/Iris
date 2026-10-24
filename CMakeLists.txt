@@ -47,8 +47,11 @@ add_library(iris_core
     src/model/subtitle.cpp
     src/ops/ffmpeg_convert.cpp
     src/ops/audio_preprocess.cpp
+    src/ops/asr_pipeline.cpp
+    src/ops/analyze_emotion.cpp
     src/ops/transcribe.cpp
     src/ops/sentence_split.cpp
+    src/ops/dub_tts.cpp
     src/asr/asr.cpp
     src/asr/ct2_mel.cpp
     src/asr/onnx.cpp
@@ -57,6 +60,10 @@ add_library(iris_core
     src/infra/pipe_reader.cpp
     src/infra/i18n.cpp
     src/ops/vsf.cpp
+    src/tts/tts.cpp
+    src/tts/timestretch.cpp
+    src/tts/gguf.cpp
+    src/tts/qwen3_tts.cpp
     src/tts/indextts.cpp
     src/emotion/emotion.cpp)
 target_include_directories(iris_core PUBLIC

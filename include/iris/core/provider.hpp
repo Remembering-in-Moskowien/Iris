@@ -9,7 +9,7 @@
 namespace iris::core {
 
 /// 提供者能力（对应 C# IProvider capabilities）。
-enum class Capability { Asr, Ocr, Llm, Tts, Diarization, VocalSeparation };
+enum class Capability { Asr, Ocr, Llm, Tts, Diarization, VocalSeparation, Emotion };
 
 /// 提供者注册项。
 struct ProviderInfo {
