@@ -35,6 +35,15 @@ void init();
 /// 直接写一段 UTF-8 文本到控制台（Windows 走 WriteConsoleW，重定向时写字节）。
 void write_utf8(const std::string& text, bool to_stderr = false);
 
+/// Agent 模式（对应 C# 的 --agent）：面向 LLM/脚本的纯文本输出。
+/// 关闭颜色与装饰，行首加固定级别前缀（INFO/OK/WARN/ERROR/STEP），
+/// 关闭 spinner 与进度条动画，符号退化为 ASCII。必须在 init() 之前调用。
+void set_agent_mode(bool on);
+[[nodiscard]] bool agent_mode();
+
+/// 行首前缀（agent 模式使用；非 agent 模式返回空串）。
+std::string agent_prefix(const std::string& level);
+
 /// 是否启用颜色（TTY 且未设置 NO_COLOR / IRIS_PLAIN）。
 bool colors_enabled();
 

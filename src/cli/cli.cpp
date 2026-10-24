@@ -12,6 +12,7 @@
 #include "iris/controller/commands.hpp"
 #include "iris/text/punctuate.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/ui/console.hpp"
 #include "iris/model/config.hpp"
 
 namespace iris::cli {
@@ -33,6 +34,9 @@ int run(int argc, char** argv) {
 
     bool verbose = false;
     app.add_flag("-v,--verbose", verbose, "Verbose logging");
+    bool agent = false;
+    app.add_flag("--agent", agent,
+                 "Agent mode: plain INFO/OK/WARN/ERROR output, no colours, spinners or timestamps");
     std::string config_path;
     app.add_option("--config", config_path,
                    "Config file (default: <install drive>/iris/config.json; IRIS_HOME overrides)")
@@ -314,6 +318,13 @@ int run(int argc, char** argv) {
 
     CLI11_PARSE(app, argc, argv);
 
+    // --agent 要在日志初始化之前设定，才能让日志格式也变成纯文本
+    // IRIS_AGENT=1 让子进程（如 serve 派发的任务）也保持 agent 输出
+    if (const char* agent_env = std::getenv("IRIS_AGENT");
+        agent_env != nullptr && *agent_env != '0' && *agent_env != '\0') {
+        agent = true;
+    }
+    if (agent) iris::ui::set_agent_mode(true);
     infra::init_logger(verbose);
 
     // 配置：--config / IRIS_CONFIG / 用户目录（首次运行会生成）

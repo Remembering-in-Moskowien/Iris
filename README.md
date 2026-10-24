@@ -365,3 +365,24 @@ iris --config other.json asr in.mp4 -l zh
 ```
 
 命令行显式传入的路径优先于配置；未传时按配置解析（例如 `iris asr in.mp4 -l zh` 会用配置里的 ASR 模型）。
+## Agent 模式（`--agent`）
+
+面向 LLM / 脚本的纯文本输出（对应原 Centurion 的 `--agent`）：
+
+```bash
+iris --agent asr in.mp4 -l zh -o out.iris.json
+STEP  ffmpeg_convert
+INFO  ffmpeg_convert: 输出 C:\...\converted.wav
+OK    ffmpeg_convert (0.1s)
+STEP  transcribe
+INFO  transcribe: 1 句
+OK    transcribe (1.4s)
+```
+
+规则：
+
+- 行首固定级别前缀 `INFO / OK / WARN / ERROR / STEP`（5 列对齐），便于正则解析；
+- 关闭 ANSI 颜色、banner、表格装饰、spinner 与进度条动画；
+- 日志去掉时间戳与颜色，格式为 `LEVEL message`；
+- 符号退化为 ASCII（`OK / ERR / -> / >`）；
+- `IRIS_AGENT=1` 等价于 `--agent`，可用于让 `serve` 派发的子任务也保持该格式。

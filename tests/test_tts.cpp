@@ -606,6 +606,22 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
     }
 }
 
+TEST_CASE("ui: agent mode switches to plain prefixed output", "[ui]") {
+    iris::ui::set_agent_mode(true);
+    REQUIRE(iris::ui::agent_mode());
+    REQUIRE_FALSE(iris::ui::colors_enabled());
+    REQUIRE(iris::ui::symbols().check == "OK");   // 符号退化为 ASCII
+    REQUIRE(iris::ui::symbols().cross == "ERR");
+    REQUIRE(iris::ui::agent_prefix("OK") == "OK    ");
+    REQUIRE(iris::ui::agent_prefix("INFO") == "INFO  ");
+    REQUIRE(iris::ui::agent_prefix("ERROR") == "ERROR ");
+    REQUIRE(iris::ui::agent_prefix("STEP") == "STEP  ");
+
+    iris::ui::set_agent_mode(false);
+    REQUIRE_FALSE(iris::ui::agent_mode());
+    REQUIRE(iris::ui::agent_prefix("OK").empty()); // 非 agent 模式不加前缀
+}
+
 TEST_CASE("config: data root follows IRIS_HOME and the install drive", "[config]") {
     const char* old = std::getenv("IRIS_HOME");
     const std::string saved = old != nullptr ? old : "";

@@ -31,6 +31,9 @@ std::atomic<bool> g_unicode{true};
 std::atomic<bool> g_tty{false};
 std::mutex g_out_mutex;
 
+std::atomic<bool> g_agent{false};
+Symbols g_symbols;
+
 bool env_set(const char* name) {
     const char* v = std::getenv(name);
     return v != nullptr && *v != '\0';
@@ -74,22 +77,19 @@ std::string paint(const char* code, const std::string& s) {
     return std::string("\x1b[") + code + "m" + s + "\x1b[0m";
 }
 
-const Symbols& symbols_impl() {
-    static Symbols sym = [] {
-        Symbols s;
-        if (!g_unicode.load()) {
-            s.check = "OK";
-            s.cross = "ERR";
-            s.arrow = "->";
-            s.play = ">";
-            s.dot = "*";
-            s.ring = "o";
-            s.mid_dot = "-";
-            s.unicode = false;
-        }
-        return s;
-    }();
-    return sym;
+Symbols make_symbols(bool unicode) {
+    Symbols s;
+    if (!unicode) {
+        s.check = "OK";
+        s.cross = "ERR";
+        s.arrow = "->";
+        s.play = ">";
+        s.dot = "*";
+        s.ring = "o";
+        s.mid_dot = "-";
+        s.unicode = false;
+    }
+    return s;
 }
 
 // ---- Windows 控制台输出（WriteConsoleW，绕开代码页）----
@@ -272,6 +272,7 @@ void init() {
         g_colors.store((g_tty.load() || env_set("IRIS_FORCE_COLOR")) && !env_set("NO_COLOR") &&
                        !env_set("IRIS_PLAIN"));
         g_unicode.store(!env_set("IRIS_ASCII"));
+        g_symbols = make_symbols(g_unicode.load());
     });
 }
 
@@ -301,7 +302,42 @@ bool unicode_enabled() {
 
 const Symbols& symbols() {
     init();
-    return symbols_impl();
+    return g_symbols;
+}
+
+void set_agent_mode(bool on) {
+    g_agent.store(on);
+    // 先确保初始化跑过（否则随后的 init() 会覆盖这里的设置）
+    init();
+    if (on) {
+        g_tty.store(false);
+        g_colors.store(false);
+        g_unicode.store(false);
+        g_symbols = make_symbols(false);
+    } else {
+        // 退出 agent 模式：恢复颜色/符号判定
+#ifdef _WIN32
+        g_tty.store(is_console_handle(GetStdHandle(STD_OUTPUT_HANDLE)));
+#else
+        g_tty.store(::isatty(STDOUT_FILENO) != 0);
+#endif
+        g_colors.store((g_tty.load() || env_set("IRIS_FORCE_COLOR")) && !env_set("NO_COLOR") &&
+                       !env_set("IRIS_PLAIN"));
+        g_unicode.store(!env_set("IRIS_ASCII"));
+        g_symbols = make_symbols(g_unicode.load());
+    }
+}
+
+bool agent_mode() {
+    init();
+    return g_agent.load();
+}
+
+std::string agent_prefix(const std::string& level) {
+    if (!g_agent.load()) return {};
+    std::string prefix = level;
+    while (prefix.size() < 5) prefix.push_back(' ');
+    return prefix + ' ';
 }
 
 std::string bold(const std::string& s) { return paint("1", s); }
@@ -391,6 +427,12 @@ std::string human_duration(double seconds) {
 
 void banner(const std::string& title, const std::string& subtitle) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << "INFO  " << title;
+        if (!subtitle.empty()) std::cout << " - " << subtitle;
+        std::cout << '\n';
+        return;
+    }
     // 边框按「显示宽度」拼：std::string(n, '─') 会重复单字节，产出非法 UTF-8。
     const auto width = std::max<std::size_t>(display_width(title) + 4, 44);
     std::string line;
@@ -413,36 +455,64 @@ void banner(const std::string& title, const std::string& subtitle) {
 
 void section(const std::string& title) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << "INFO  == " << title << " ==\n";
+        return;
+    }
     std::cout << '\n' << cyan("▌ ") << bold(title) << '\n';
 }
 
 void success(const std::string& message) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << "OK    " << message << '\n';
+        return;
+    }
     std::cout << "  " << green(symbols().check) << ' ' << message << '\n';
 }
 
 void failure(const std::string& message) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cerr << "ERROR " << message << '\n';
+        return;
+    }
     std::cerr << "  " << red(symbols().cross) << ' ' << message << '\n';
 }
 
 void warning(const std::string& message) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << "WARN  " << message << '\n';
+        return;
+    }
     std::cout << "  " << yellow(symbols().dot) << ' ' << message << '\n';
 }
 
 void step(const std::string& message) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << "STEP  " << message << '\n';
+        return;
+    }
     std::cout << "  " << cyan(symbols().arrow) << ' ' << message << '\n';
 }
 
 void note(const std::string& message) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << "INFO  " << message << '\n';
+        return;
+    }
     std::cout << "  " << dim(symbols().mid_dot) << ' ' << dim(message) << '\n';
 }
 
 void finish(bool ok, const std::string& message) {
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << (ok ? "OK    " : "ERROR ") << message << '\n';
+        return;
+    }
     std::cout << '\n' << (ok ? green(symbols().check + " " + message)
                              : red(symbols().cross + " " + message))
               << '\n';
@@ -490,6 +560,12 @@ void table(const std::vector<std::string>& headers,
 // ---------------------------------------------------------------------------
 Spinner::Spinner(std::string label) : label_(std::move(label)) {
     init();
+    if (g_agent.load()) {
+        std::lock_guard<std::mutex> lock(g_out_mutex);
+        std::cout << "STEP  " << label_ << '\n' << std::flush;
+        active_ = true;
+        return;
+    }
     if (!g_tty.load() || env_set("IRIS_PLAIN")) {
         std::lock_guard<std::mutex> lock(g_out_mutex);
         std::cout << "  " << label_ << "..." << std::flush;
@@ -517,6 +593,12 @@ void Spinner::stop(bool ok, const std::string& final_text) {
     if (!active_) return;
     active_ = false;
     std::lock_guard<std::mutex> lock(g_out_mutex);
+    if (g_agent.load()) {
+        std::cout << (ok ? "OK    " : "ERROR ") << (final_text.empty() ? label_ : final_text)
+                  << '\n'
+                  << std::flush;
+        return;
+    }
     if (g_tty.load()) std::cout << "\r\x1b[2K";
     std::cout << "  " << (ok ? green(symbols().check) : red(symbols().cross)) << ' '
               << (final_text.empty() ? label_ : final_text) << '\n'
@@ -527,6 +609,24 @@ void Spinner::stop(bool ok, const std::string& final_text) {
 // StagePrinter
 // ---------------------------------------------------------------------------
 void StagePrinter::begin(const std::string& stage) {
+    if (g_agent.load()) {
+        if (active_) {
+            const double secs =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
+            std::lock_guard<std::mutex> lock(g_out_mutex);
+            std::cout << "OK    " << current_ << " (" << human_duration(secs) << ")\n";
+        }
+        if (!stage.empty() && stage == current_ && active_) {
+            active_ = false;
+            return;
+        }
+        current_ = stage;
+        started_ = std::chrono::steady_clock::now();
+        active_ = true;
+        std::lock_guard<std::mutex> lock(g_out_mutex);
+        std::cout << "STEP  " << stage << '\n' << std::flush;
+        return;
+    }
     // 流水线对同一阶段会回调两次（开始/结束），同名即视为收尾。
     if (active_ && stage == current_) {
         const double secs =
@@ -553,6 +653,14 @@ void StagePrinter::begin(const std::string& stage) {
 
 void StagePrinter::finish() {
     if (!active_) return;
+    if (g_agent.load()) {
+        const double secs =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
+        active_ = false;
+        std::lock_guard<std::mutex> lock(g_out_mutex);
+        std::cout << "OK    " << current_ << " (" << human_duration(secs) << ")\n";
+        return;
+    }
     const double secs =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
     active_ = false;
@@ -584,6 +692,7 @@ void ProgressBar::begin(std::int64_t total_bytes) {
 
 void ProgressBar::update(std::int64_t done_bytes) {
     done_ = done_bytes;
+    if (g_agent.load()) return; // agent 模式只保留开始/结束两行，不打进度动画
     if (!g_tty.load() || env_set("IRIS_PLAIN")) return;
     const auto t = now_ms();
     if (t - last_render_ms_ < 120) return; // 限流，避免刷屏
