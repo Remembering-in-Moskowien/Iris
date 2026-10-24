@@ -11,6 +11,8 @@
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/catalog/models.hpp"
+#include "iris/server/api.hpp"
+#include "iris/server/http_server.hpp"
 #include "iris/ocr/rapid_ocr.hpp"
 #include "iris/quality/report.hpp"
 #include "iris/ops/dub_tts.hpp"
@@ -598,6 +600,36 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("serve: http request parsing helpers", "[serve]") {
+    iris::server::HttpRequest req;
+    std::string error;
+    REQUIRE(iris::server::parse_request_head(
+        "POST /jobs?x=1&y=a%20b HTTP/1.1\r\nContent-Length: 5\r\nContent-Type: application/json",
+        req, error));
+    REQUIRE(req.method == "POST");
+    REQUIRE(req.path == "/jobs");
+    REQUIRE(req.query.at("x") == "1");
+    REQUIRE(req.query.at("y") == "a b");
+    REQUIRE(req.headers.at("content-length") == "5");
+    REQUIRE(req.headers.at("content-type") == "application/json");
+
+    REQUIRE(iris::server::url_decode("a%2Fb+c") == "a/b c");
+    REQUIRE(iris::server::url_decode("%E4%BD%A0") == "你");
+    REQUIRE(iris::server::url_decode("100%") == "100%"); // 残缺百分号原样保留
+
+    REQUIRE(iris::server::path_param("/jobs/{id}", "/jobs/job7") == "job7");
+    REQUIRE(iris::server::path_param("/jobs/{id}", "/jobs/").empty());
+    REQUIRE(iris::server::path_param("/jobs/{id}", "/models").empty());
+
+    REQUIRE(iris::server::json_escape("a\"b\n") == "a\\\"b\\n");
+    REQUIRE_FALSE(iris::server::parse_request_head("garbage", req, error));
+
+    // 白名单：不含 serve 自身与未知命令
+    const auto& allowed = iris::server::JobManager::allowed_commands();
+    REQUIRE(std::find(allowed.begin(), allowed.end(), "asr") != allowed.end());
+    REQUIRE(std::find(allowed.begin(), allowed.end(), "serve") == allowed.end());
 }
 
 TEST_CASE("catalog: model registry integrity and helpers", "[catalog]") {

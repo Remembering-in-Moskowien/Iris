@@ -119,6 +119,10 @@ struct OcrCommandOptions {
     double sample_fps = 1.0;
 };
 
+/// serve：启动 REST 服务（异步任务 API）。
+int run_serve(const std::string& host, int port, const std::string& models_root,
+              const std::string& work_root);
+
 /// models list：列出注册表里模型的本机安装状态。
 int run_models_list(const std::string& models_root);
 

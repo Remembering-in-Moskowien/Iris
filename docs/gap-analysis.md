@@ -8,7 +8,7 @@ commit `7a3acd1`，2026-10-07）。方法：枚举对方的 CLI 命令注册、`
 
 C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命令 + 7 个算子**。
 主链（转码 → 预处理 → 转写 → 分句 → 渲染）已对等，翻译（非 LLM）与配音在 iris 侧
-已能端到端跑通；**说话人分割、人声分离、校正、OCR、字幕导入、质量报告、模型管理**已补齐，仍缺 **REST 服务与 `update`**
+已能端到端跑通；**说话人分割、人声分离、校正、OCR、字幕导入、质量报告、模型管理、REST 服务**均已补齐，仅剩 `update` / `migrate` / LLM 类能力
 这些整条链路仍然缺失，其中**说话人分割（Diarization）确实不在 iris 链路上**——
 但运行时与模型都已就绪，可以立刻接。
 
@@ -43,7 +43,7 @@ C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命�
 | 字幕导入 | `ConvertParseOperator`、`CombineParse/Merge/Dedupe` | ✅ `convert` / `combine`（SRT/ASS/SSA/VTT 解析、去重、双语按时间重叠对齐） | ✅ |
 | 质量报告 | `QualityReportOperator` + 整套 `Quality*` 模型 | ✅ `quality` 命令：CPS（按语言阈值）、覆盖率、重叠、长空白、重复、空行、说话人分布 + 自包含 HTML（`Quality*` 里的模型类指标未做，纯统计） | ✅ |
 | 管线图 | `PipelineGraphCommand` / `PipelineGraphRenderer` | 无 | ❌ |
-| REST 服务 | `ServeCommand`（ASP.NET Core in-process） | 无 | ❌ |
+| REST 服务 | `ServeCommand`（ASP.NET Core in-process） | ✅ `serve`：自写 HTTP/1.1 + 异步任务队列（每任务一个 `iris` 子进程），端点 `/health` `/commands` `/models` `/jobs` | ✅ |
 | 模型管理 | `models install/verify/remove`、`ModelRegistry` | 仅 `models list` | ❌ |
 | 提供者诊断 | `providers list/test`、`ApiKeyStore`、`ProviderPolicies` | 仅 `models list` 静态表 | ❌ |
 | 自更新 | `UpdateCommand`（存在但未在 CLI 注册） | 无 | ❌ |
@@ -96,7 +96,7 @@ C# `Centurion.Models` 里 iris 目前缺的字段：
 | P1 | 标点恢复 | 中文 ASR（Paraformer/SenseVoice）默认不带标点 | ✅ `asr --punc`（FireRedPunc） |
 | P1 | dub 接入说话人（多音色） | 分割标签已有，差「按 speaker 选音色」 | ✅ `dub --voice SPEAKER=ref.wav` / `--voices voices.json` |
 | P2 | 质量报告（Quality* + HTML） | 依赖校正/对齐数据先齐 | ✅ `quality` 命令 |
-| P2 | LLM 翻译/分句、云 provider、REST、`migrate`、`update` | 依赖模型与密钥体系 | ⏳ 待做 |
+| P2 | LLM 翻译/分句、云 provider、`migrate`、`update` | 依赖模型与密钥体系 / 发布渠道 | ⏳ 待做（REST 已完成） |
 
 ### 人声分离的实测代价与并行化
 

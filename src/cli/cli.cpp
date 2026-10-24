@@ -1,6 +1,7 @@
 #include "iris/cli/cli.hpp"
 
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -206,6 +207,17 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- serve ----
+    auto* serve = app.add_subcommand("serve", "Start the REST API (async job queue)");
+    std::string serve_host = "127.0.0.1";
+    std::string serve_models = "models";
+    std::string serve_work = (std::filesystem::temp_directory_path() / "iris-serve").string();
+    int serve_port = 8080;
+    serve->add_option("--host", serve_host, "Bind address (default 127.0.0.1)")->capture_default_str();
+    serve->add_option("--port,-p", serve_port, "Port")->capture_default_str();
+    serve->add_option("--models", serve_models, "Models directory")->capture_default_str();
+    serve->add_option("--work", serve_work, "Job work directory")->capture_default_str();
+
     // ---- models ----
     auto* models = app.add_subcommand("models", "List or install the models iris uses");
     auto* models_list = models->add_subcommand("list", "Show installed / missing models");
@@ -333,6 +345,7 @@ int run(int argc, char** argv) {
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
+    if (serve->parsed()) return controller::run_serve(serve_host, serve_port, serve_models, serve_work);
     if (models_list->parsed()) return controller::run_models_list(models_root);
     if (vsf->parsed()) {
         int rx=0, ry=0, rw=0, rh=0;
@@ -353,6 +366,7 @@ int run(int argc, char** argv) {
     }
     if (translate->parsed()) return controller::run_translate(translate_opts);
     if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (serve->parsed()) return controller::run_serve(serve_host, serve_port, serve_models, serve_work);
     if (models_list->parsed()) return controller::run_models_list(models_root);
     if (models_install->parsed())
         return controller::run_models_install(install_keys, models_root, models_mirror, install_all,

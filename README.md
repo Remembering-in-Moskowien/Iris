@@ -251,12 +251,14 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | `build` | IR → ASS / SRT / TXT | ✅ 已迁移 |
 | `validate` | IR 结构校验 | ✅ 已迁移 |
 | `doctor` | 环境诊断（ffmpeg / ASR / TTS 后端 / 配置） | ✅ 已迁移 |
+| `serve` | REST API：`POST /jobs` 提交子命令、`GET /jobs/{id}` 查状态与产物（异步子进程） | ✅ 已迁移 |
 | `models` | 提供者注册表 | ✅ 已迁移 |
 | `tts` | 文本 → 语音（qwen3-tts / indextts，音色克隆） | ✅ 已迁移 |
 | `emotion` | 语音情感分析（6 类 wav2vec2 ONNX） | ✅ 已迁移 |
 | `dub` | 配音链路：媒体/IR → (asr) → (emotion) → 逐句 TTS → 配音音轨 | ✅ 已迁移 |
 | `vsf` | 视频硬字幕帧定位（自实现，无 OpenCV） | ✅ 已迁移 |
 | `init` | 交互式设置 | 🚧 待迁移 |
+| `serve` | REST API：`POST /jobs` 提交子命令、`GET /jobs/{id}` 查状态与产物（异步子进程） | ✅ 已迁移 |
 | `models` | 模型注册表：`models list` 看安装状态，`models install [keys] [--all] [--category x]` 一键下载（支持 `--mirror`/`IRIS_HF_MIRROR`） | ✅ 已迁移 |
 | `quality` | 字幕质量报告（CPS/重叠/空白/重复/说话人，输出自包含 HTML；有 error 时 exit 2） | ✅ 已迁移 |
 | `ocr` | 视频硬字幕 → IR（vsf 找字幕段 + PP-OCRv5 检测/识别） | ✅ 已迁移 |
