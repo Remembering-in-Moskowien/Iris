@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "iris/model/ir_document.hpp"
+#include "iris/mt/translator.hpp"
 #include "iris/tts/gguf.hpp"
 #include "iris/tts/kernels.hpp"
 #include "iris/tts/talker.hpp"
@@ -365,6 +366,23 @@ TEST_CASE("talker: mRoPE sections split the rotation pairs", "[talker]") {
     REQUIRE(std::abs(a[2] - b[2]) < 1e-6f);
     REQUIRE(std::abs(a[3] - b[3]) < 1e-6f);
     REQUIRE(std::abs(a[4] - b[4]) > 1e-6f);
+}
+
+TEST_CASE("translate: language codes and Chinese output normalisation", "[mt]") {
+    REQUIRE(iris::mt::normalize_language("en-US") == "en");
+    REQUIRE(iris::mt::normalize_language("zh-CN") == "zh");
+    REQUIRE(iris::mt::normalize_language("cmn") == "zh");
+    REQUIRE(iris::mt::normalize_language("EN") == "en");
+    REQUIRE(iris::mt::normalize_language("ja") == "ja");
+
+    // 半角标点 → 全角；汉字旁的空格去掉；数字间的小数点保留
+    REQUIRE(iris::mt::normalize_output("你好,世界.", "zh") == "你好，世界。");
+    REQUIRE(iris::mt::normalize_output("我 爱 北京", "zh") == "我爱北京");
+    REQUIRE(iris::mt::normalize_output("增长 3.5 个百分点", "zh") == "增长3.5个百分点");
+    REQUIRE(iris::mt::normalize_output("什么?", "zh") == "什么？");
+
+    // 非中文目标语言：只折叠空格，标点保持原样
+    REQUIRE(iris::mt::normalize_output("Hello,   world.", "en") == "Hello, world.");
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {

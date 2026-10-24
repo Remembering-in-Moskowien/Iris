@@ -123,6 +123,32 @@ int run(int argc, char** argv) {
     bool no_fit = false;
     dub->add_flag("--no-fit", no_fit, "Disable fitting cues to the original timing");
 
+    // ---- translate ----
+    auto* translate = app.add_subcommand(
+        "translate", "Machine translation (non-LLM: OPUS-MT/Marian, M2M100)");
+    controller::TranslateCommandOptions translate_opts;
+    translate->add_option("input", translate_opts.input, "IR file (*.json) or media file")
+        ->required();
+    translate->add_option("--model,-m", translate_opts.model, "Translation model (GGUF)")
+        ->required();
+    translate->add_option("--engine", translate_opts.engine,
+                          "Backend (auto | m2m100 | opus-mt | wmt21 | madlad)")
+        ->capture_default_str();
+    translate->add_option("--from", translate_opts.from, "Source language")
+        ->capture_default_str();
+    translate->add_option("--to", translate_opts.to, "Target language")->capture_default_str();
+    translate->add_option("--out,-o", translate_opts.out_ir, "Output IR path");
+    translate->add_option("--asr-engine", translate_opts.asr_engine,
+                          "ASR engine for media input (whisper | qwen3-asr | whisper-ct2)")
+        ->capture_default_str();
+    translate->add_option("--asr-model", translate_opts.asr_model, "ASR model (media input)");
+    translate->add_option("--beam", translate_opts.beam_size,
+                          "Beam size (1 = greedy; MT checkpoints default to 5)")
+        ->capture_default_str();
+    translate->add_option("--max-tokens", translate_opts.max_tokens,
+                          "Max generated tokens per sentence")
+        ->capture_default_str();
+
     // ---- init ----
     app.add_subcommand("init", "Interactive setup (stub, planned)");
 
@@ -152,6 +178,7 @@ int run(int argc, char** argv) {
         dub_opts.fit_timing = !no_fit;
         return controller::run_dub(dub_opts);
     }
+    if (translate->parsed()) return controller::run_translate(translate_opts);
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << _("init: interactive setup coming soon\n", "init: 交互式设置将在后续版本实现\n");

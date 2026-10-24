@@ -52,6 +52,7 @@ add_library(iris_core
     src/ops/transcribe.cpp
     src/ops/sentence_split.cpp
     src/ops/dub_tts.cpp
+    src/ops/translate.cpp
     src/asr/asr.cpp
     src/asr/ct2_mel.cpp
     src/asr/onnx.cpp
@@ -68,6 +69,7 @@ add_library(iris_core
     src/tts/talker.cpp
     src/tts/qwen3_tts.cpp
     src/tts/indextts.cpp
+    src/mt/translator.cpp
     src/emotion/emotion.cpp)
 target_include_directories(iris_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -108,7 +110,8 @@ add_executable(iris
     src/controller/vsf_command.cpp
     src/controller/tts_command.cpp
     src/controller/emotion_command.cpp
-    src/controller/dub_command.cpp)
+    src/controller/dub_command.cpp
+    src/controller/translate_command.cpp)
 target_link_libraries(iris PRIVATE iris_core CLI11::CLI11)
 target_compile_options(iris PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 set_target_properties(iris PROPERTIES

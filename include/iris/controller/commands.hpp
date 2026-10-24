@@ -78,6 +78,23 @@ struct DubOptions {
 /// dub：配音线路串联（asr → emotion → tts）。
 int run_dub(const DubOptions& opts);
 
+/// translate 命令参数（IR/媒体 → 逐句翻译 → 新增 translation 轨道）。
+struct TranslateCommandOptions {
+    std::string input;                         ///< IR（*.json）或媒体文件
+    std::string model;                         ///< 翻译模型 GGUF
+    std::string engine = "auto";               ///< auto | m2m100 | opus-mt | wmt21 | madlad
+    std::string from = "en";
+    std::string to = "zh";
+    std::string out_ir;                        ///< 非空则把结果 IR 存到该路径
+    std::string asr_engine = "whisper";        ///< 媒体输入时使用
+    std::string asr_model;
+    int beam_size = 5;
+    int max_tokens = 256;
+};
+
+/// translate：机器翻译（非 LLM：OPUS-MT/Marian、M2M100）。
+int run_translate(const TranslateCommandOptions& opts);
+
 /// emotion：语音情感分析（A/D/V 三维，Wav2Small ONNX）。
 int run_emotion(const std::string& onnx_path, const std::string& wav_path);
 
