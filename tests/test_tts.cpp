@@ -11,6 +11,7 @@
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/catalog/models.hpp"
+#include "iris/model/config.hpp"
 #include "iris/script/align.hpp"
 #include "iris/server/api.hpp"
 #include "iris/ui/console.hpp"
@@ -602,6 +603,40 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("config: json round-trip and model path resolution", "[config]") {
+    using iris::model::AppConfig;
+
+    AppConfig cfg;
+    cfg.models_dir = R"(D:\models)";
+    cfg.hf_mirror = "https://hf-mirror.com";
+    cfg.asr_model = "ggml/ggml-base.bin";
+    cfg.tts_codec = "qwen3-tts/qwen3-tts-tokenizer-12hz.gguf";
+    cfg.threads = 8;
+
+    // JSON 往返
+    const auto j = cfg.to_json();
+    const auto back = AppConfig::from_json(j);
+    REQUIRE(back.models_dir == cfg.models_dir);
+    REQUIRE(back.hf_mirror == cfg.hf_mirror);
+    REQUIRE(back.asr_model == cfg.asr_model);
+    REQUIRE(back.tts_codec == cfg.tts_codec);
+    REQUIRE(back.threads == 8);
+
+    // 相对路径拼到 modelsDir 下；绝对路径原样
+    REQUIRE(cfg.resolve("ggml/ggml-base.bin") ==
+            (std::filesystem::path(cfg.models_dir) / "ggml" / "ggml-base.bin").string());
+    const std::string absolute =
+        (std::filesystem::path(cfg.models_dir) / "abs" / "x.gguf").string();
+    REQUIRE(cfg.resolve(absolute) == absolute);
+    REQUIRE(cfg.resolve("").empty());
+
+    // 未知字段/损坏内容不炸
+    const auto partial = AppConfig::from_json(nlohmann::json::parse(R"({"threads": 4})"));
+    REQUIRE(partial.threads == 4);
+    REQUIRE_FALSE(partial.asr_engine.empty());
+    REQUIRE(AppConfig::load_or_default("does/not/exist.json").version == 1);
 }
 
 TEST_CASE("script: tokenize, similarity and timeline alignment", "[script]") {

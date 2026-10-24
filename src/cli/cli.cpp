@@ -12,6 +12,7 @@
 #include "iris/controller/commands.hpp"
 #include "iris/text/punctuate.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/model/config.hpp"
 
 namespace iris::cli {
 
@@ -32,6 +33,10 @@ int run(int argc, char** argv) {
 
     bool verbose = false;
     app.add_flag("-v,--verbose", verbose, "Verbose logging");
+    std::string config_path;
+    app.add_option("--config", config_path,
+                   "Config file (default: %APPDATA%/iris/config.json, legacy ./iris.config.json)")
+        ->envname("IRIS_CONFIG");
 
     // ---- asr ----
     auto* asr = app.add_subcommand("asr", "Transcribe media to an IR file (*.iris.json)");
@@ -207,6 +212,12 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- config ----
+    auto* config = app.add_subcommand("config", "Show or create the user configuration");
+    auto* config_show = config->add_subcommand("show", "Print the active config as JSON");
+    auto* config_path_cmd = config->add_subcommand("path", "Print the active config file path");
+    auto* config_init = config->add_subcommand("init", "Write the default config if missing");
+
     // ---- from-script ----
     auto* from_script = app.add_subcommand(
         "from-script", "Align a plain-text script to the media and produce timed subtitles");
@@ -239,10 +250,7 @@ int run(int argc, char** argv) {
     auto* models = app.add_subcommand("models", "List or install the models iris uses");
     auto* models_list = models->add_subcommand("list", "Show installed / missing models");
     std::string models_root = "models";
-    std::string models_mirror = [] {
-        const char* env = std::getenv("IRIS_HF_MIRROR");
-        return env != nullptr ? std::string(env) : std::string();
-    }();
+    std::string models_mirror;
     models_list->add_option("--root", models_root, "Models directory")->capture_default_str();
 
     auto* models_install = models->add_subcommand("install", "Download models into the models tree");
@@ -308,8 +316,18 @@ int run(int argc, char** argv) {
 
     infra::init_logger(verbose);
 
+    // 配置：--config / IRIS_CONFIG / 用户目录（首次运行会生成）
+    auto cfg = model::load_active_config(config_path);
+    if (verbose) {
+        spdlog::info("config: {}", model::active_config_path());
+        spdlog::info("models: {}", cfg.models_dir);
+    }
+
     // 分发到 MVC Controller 层。
     if (asr->parsed()) {
+        // 配置里的默认值：--model 未给时用 asr.model，--split-model 仍是默认目录时用 sat.modelDir
+        if (asr_model.empty()) asr_model = cfg.resolve(cfg.asr_model);
+        if (asr_split_model == "models/sat") asr_split_model = cfg.resolve(cfg.sat_model_dir);
         asr::SeparateOptions separate_opts;
         const asr::SeparateOptions* separate_ptr = nullptr;
         if (asr_separate) {
@@ -362,9 +380,6 @@ int run(int argc, char** argv) {
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);
-    if (from_script->parsed()) return controller::run_from_script(from_script_opts);
-    if (serve->parsed()) return controller::run_serve(serve_host, serve_port, serve_models, serve_work);
-    if (models_list->parsed()) return controller::run_models_list(models_root);
     if (vsf->parsed()) {
         int rx=0, ry=0, rw=0, rh=0;
         if (std::sscanf(vsf_roi_str.c_str(), "%d,%d,%d,%d", &rx, &ry, &rw, &rh) != 4) {
@@ -379,19 +394,46 @@ int run(int argc, char** argv) {
     }
     if (emo->parsed()) return controller::run_emotion(emo_onnx, emo_wav);
     if (dub->parsed()) {
+        if (dub_opts.model.empty()) dub_opts.model = cfg.resolve(cfg.tts_model);
+        if (dub_opts.codec.empty()) dub_opts.codec = cfg.resolve(cfg.tts_codec);
+        if (dub_opts.ref_wav.empty() && !cfg.tts_ref_wav.empty()) dub_opts.ref_wav = cfg.tts_ref_wav;
+        if (dub_opts.ref_text.empty()) dub_opts.ref_text = cfg.tts_ref_text;
         dub_opts.fit_timing = !no_fit;
         return controller::run_dub(dub_opts);
     }
-    if (translate->parsed()) return controller::run_translate(translate_opts);
+    if (translate->parsed()) {
+        if (translate_opts.model.empty()) translate_opts.model = cfg.resolve(cfg.translate_model);
+        if (translate_opts.engine == "auto" && !cfg.translate_engine.empty()) {
+            translate_opts.engine = cfg.translate_engine;
+        }
+        return controller::run_translate(translate_opts);
+    }
     if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (config_path_cmd->parsed()) {
+        std::cout << model::active_config_path() << '\n';
+        return 0;
+    }
+    if (config_show->parsed()) {
+        std::cout << cfg.to_json().dump(2) << '\n';
+        return 0;
+    }
+    if (config_init->parsed()) {
+        std::cout << model::active_config_path() << '\n';
+        cfg.save(model::active_config_path());
+        return 0;
+    }
     if (from_script->parsed()) return controller::run_from_script(from_script_opts);
-    if (serve->parsed()) return controller::run_serve(serve_host, serve_port, serve_models, serve_work);
-    if (models_list->parsed()) return controller::run_models_list(models_root);
+    if (serve->parsed()) return controller::run_serve(serve_host, serve_port, cfg.models_dir, serve_work);
+    if (models_list->parsed()) return controller::run_models_list(cfg.models_dir);
+    if (models_mirror.empty() && !cfg.hf_mirror.empty()) models_mirror = cfg.hf_mirror;
     if (models_install->parsed())
-        return controller::run_models_install(install_keys, models_root, models_mirror, install_all,
+        return controller::run_models_install(install_keys, cfg.models_dir, models_mirror, install_all,
                                               install_category, install_dry);
     if (quality->parsed()) return controller::run_quality(quality_ir, quality_out);
-    if (ocr->parsed()) return controller::run_ocr(ocr_opts);
+    if (ocr->parsed()) {
+        if (ocr_opts.model_dir == "models/ocr") ocr_opts.model_dir = cfg.resolve(cfg.ocr_model_dir);
+        return controller::run_ocr(ocr_opts);
+    }
     if (convert->parsed()) return controller::run_convert(convert_inputs, convert_lang, convert_out);
     if (combine->parsed())
         return controller::run_combine(combine_inputs, combine_lang, combine_out, combine_bilingual);

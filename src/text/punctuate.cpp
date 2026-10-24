@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "iris/infra/log.hpp"
+#include "iris/model/config.hpp"
 #include "iris/infra/quiet.hpp"
 
 #if IRIS_HAS_CRISPASR
@@ -30,8 +31,8 @@ std::string default_punc_model() {
     } else if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         dirs.push_back(fs::path(home) / ".cache" / "crispasr");
     }
-    dirs.push_back(fs::path("models") / "punc");
-    dirs.push_back(fs::path("models"));
+    dirs.push_back(fs::path(model::models_root()) / "punc");
+    dirs.push_back(fs::path(model::models_root()));
 
     for (const auto& dir : dirs) {
         if (!fs::is_directory(dir, ec)) continue;

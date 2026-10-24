@@ -323,3 +323,41 @@ MIT — 见 [LICENSE](LICENSE)。
 - 进度：下载时显示字节/速度/ETA 进度条；流水线逐阶段打印 `▶ 阶段` 与 `✓ 阶段 1.2s`；
 - 编码：Windows 控制台一律经 `WriteConsoleW` 输出（UTF-16），**不依赖也不修改控制台代码页**，因此在 GBK（936）终端里也不会乱码；重定向/管道时输出 UTF-8 字节，可被脚本按 UTF-8 解析；`IRIS_PLAIN_OUTPUT=1` 可退回原始字节输出；控制台上 ANSI 颜色会被翻译成控制台属性（不依赖 VT 支持），`IRIS_FORCE_COLOR=1` 可在管道里强制保留颜色，`NO_COLOR` 仍按惯例关闭颜色；
 - 第三方推理库写到 stderr 的模型加载日志默认静音，`IRIS_VERBOSE=1` 可恢复。
+## 用户配置（AppData）
+
+模型与全局设置放在用户目录的 JSON 里，不再依赖仓库内路径：
+
+| 平台 | 配置文件 |
+|---|---|
+| Windows | `%APPDATA%\iris\config.json` |
+| Linux/macOS | `$XDG_CONFIG_HOME/iris/config.json`（缺省 `~/.config/iris`） |
+
+查找顺序：`--config <path>` → `IRIS_CONFIG` → 用户目录 → 仓库内 `./iris.config.json`（兼容旧用法）。
+首次运行会自动生成配置文件与模型目录（若仓库内已有 `models/` 则沿用它，避免打断现有工作流）。
+
+```bash
+iris config path     # 当前配置文件
+iris config show     # 当前配置（JSON）
+iris config init     # 生成默认配置
+iris --config other.json asr in.mp4 -l zh
+```
+
+主要字段（模型路径**相对 `modelsDir`**，绝对路径原样使用）：
+
+```json
+{
+  "modelsDir": "C:/Users/me/AppData/Roaming/iris/models",
+  "hfMirror": "https://hf-mirror.com",
+  "threads": 0,
+  "language": "zh",
+  "asr":       { "engine": "whisper", "model": "ggml/ggml-base.bin", "splitModel": "sat" },
+  "punc":      { "model": "punc/fireredpunc-q4_k.gguf" },
+  "separation":{ "model": "separation/htdemucs-q8_0.gguf" },
+  "ocr":       { "modelDir": "ocr" },
+  "sat":       { "modelDir": "sat" },
+  "tts":       { "model": "qwen3-tts/...q8_0.gguf", "codec": "qwen3-tts/...tokenizer-12hz.gguf", "refWav": "", "refText": "" },
+  "translate": { "engine": "auto", "model": "translation/m2m100-418m-q8_0.gguf" }
+}
+```
+
+命令行显式传入的路径优先于配置；未传时按配置解析（例如 `iris asr in.mp4 -l zh` 会用配置里的 ASR 模型）。

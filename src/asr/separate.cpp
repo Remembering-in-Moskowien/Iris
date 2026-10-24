@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "iris/infra/log.hpp"
+#include "iris/model/config.hpp"
 #include "iris/infra/process.hpp"
 #include "iris/infra/threads.hpp"
 
@@ -204,8 +205,8 @@ std::string default_separation_model() {
     } else if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         dirs.push_back(fs::path(home) / ".cache" / "crispasr");
     }
-    dirs.push_back(fs::path("models") / "separation");
-    dirs.push_back(fs::path("models"));
+    dirs.push_back(fs::path(model::models_root()) / "separation");
+    dirs.push_back(fs::path(model::models_root()));
 
     for (const char* pattern : {"htdemucs", "mel-band-roformer"}) {
         for (const auto& dir : dirs) {
