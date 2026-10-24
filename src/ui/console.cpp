@@ -99,18 +99,84 @@ bool is_console_handle(HANDLE h) {
     return h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode) != 0;
 }
 
-void write_console_wide(const std::string& utf8, HANDLE handle) {
-    if (utf8.empty()) return;
-    const int need = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
-                                         nullptr, 0);
-    if (need <= 0) return;
-    std::wstring wide(static_cast<std::size_t>(need), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), wide.data(), need);
+/// 把一段 UTF-16 写到控制台；失败时退回字节写，保证输出不丢。
+void write_wide_raw(HANDLE handle, const std::wstring& wide) {
     DWORD written = 0;
     if (WriteConsoleW(handle, wide.data(), static_cast<DWORD>(wide.size()), &written, nullptr) == 0) {
-        // 极端情况下（句柄不可写等）退回按字节写，保证输出不丢
-        WriteFile(handle, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+        const int need = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()),
+                                             nullptr, 0, nullptr, nullptr);
+        if (need > 0) {
+            std::string utf8(static_cast<std::size_t>(need), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()), utf8.data(),
+                                need, nullptr, nullptr);
+            WriteFile(handle, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+        }
     }
+}
+
+/// 把 SGR 参数（"1;31" 之类）解析成控制台属性位。
+WORD sgr_to_attr(const std::string& params, WORD base) {
+    const SgrState base_state;
+    const SgrState state = parse_sgr(params, base_state);
+    WORD attr = base;
+    if (!state.default_fg) {
+        static const WORD kFg[8] = {0, FOREGROUND_RED, FOREGROUND_GREEN,
+                                    FOREGROUND_RED | FOREGROUND_GREEN, FOREGROUND_BLUE,
+                                    FOREGROUND_RED | FOREGROUND_BLUE,
+                                    FOREGROUND_GREEN | FOREGROUND_BLUE,
+                                    FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE};
+        attr = static_cast<WORD>((attr & ~static_cast<WORD>(0x0F)) | kFg[state.fg & 7]);
+    }
+    if (state.bright) {
+        attr |= FOREGROUND_INTENSITY;
+    } else {
+        attr &= static_cast<WORD>(~FOREGROUND_INTENSITY);
+    }
+    return attr;
+}
+
+/// 写一段 UTF-8 到控制台：识别 ANSI SGR（\x1b[...m）并转成控制台属性，
+/// 这样不依赖 VT 支持也能上色；其余字节按 UTF-16 写出。
+void write_console_wide(const std::string& utf8, HANDLE handle) {
+    if (utf8.empty()) return;
+
+    CONSOLE_SCREEN_BUFFER_INFO info{};
+    const bool have_info = GetConsoleScreenBufferInfo(handle, &info) != 0;
+    const WORD base_attr = have_info ? info.wAttributes : FOREGROUND_RED | FOREGROUND_GREEN |
+                                                                 FOREGROUND_BLUE;
+    WORD attr = base_attr;
+
+    std::size_t i = 0;
+    std::string run;
+    const auto flush_run = [&] {
+        if (run.empty()) return;
+        SetConsoleTextAttribute(handle, attr);
+        const int need = MultiByteToWideChar(CP_UTF8, 0, run.data(), static_cast<int>(run.size()),
+                                             nullptr, 0);
+        if (need > 0) {
+            std::wstring wide(static_cast<std::size_t>(need), L'\0');
+            MultiByteToWideChar(CP_UTF8, 0, run.data(), static_cast<int>(run.size()), wide.data(),
+                                need);
+            write_wide_raw(handle, wide);
+        }
+        run.clear();
+    };
+
+    while (i < utf8.size()) {
+        if (utf8[i] == '\x1b' && i + 1 < utf8.size() && utf8[i + 1] == '[') {
+            const auto m = utf8.find('m', i + 2);
+            if (m != std::string::npos) {
+                flush_run();
+                attr = sgr_to_attr(utf8.substr(i + 2, m - (i + 2)), base_attr);
+                i = m + 1;
+                continue;
+            }
+        }
+        run.push_back(utf8[i]);
+        ++i;
+    }
+    flush_run();
+    SetConsoleTextAttribute(handle, base_attr);
 }
 #endif
 
@@ -202,7 +268,9 @@ void init() {
             std::cerr.rdbuf(&err_buf);
         }
 #endif
-        g_colors.store(g_tty.load() && !env_set("NO_COLOR") && !env_set("IRIS_PLAIN"));
+        // IRIS_FORCE_COLOR=1：即使不是 TTY 也输出颜色（配合 `less -R` 或日志染色）
+        g_colors.store((g_tty.load() || env_set("IRIS_FORCE_COLOR")) && !env_set("NO_COLOR") &&
+                       !env_set("IRIS_PLAIN"));
         g_unicode.store(!env_set("IRIS_ASCII"));
     });
 }
@@ -243,6 +311,37 @@ std::string red(const std::string& s) { return paint("1;31", s); }
 std::string yellow(const std::string& s) { return paint("33", s); }
 std::string cyan(const std::string& s) { return paint("36", s); }
 std::string magenta(const std::string& s) { return paint("1;35", s); }
+
+SgrState parse_sgr(const std::string& params, SgrState base) {
+    SgrState state = base;
+    std::size_t start = 0;
+    while (start <= params.size()) {
+        const auto semi = params.find(';', start);
+        const std::string item = params.substr(
+            start, semi == std::string::npos ? std::string::npos : semi - start);
+        const int code = item.empty() ? 0 : std::atoi(item.c_str());
+        if (code == 0) {
+            state = SgrState{};
+        } else if (code == 1) {
+            state.bright = true;
+        } else if (code == 22) {
+            state.bright = false;
+        } else if (code >= 30 && code <= 37) {
+            state.fg = code - 30;
+            state.default_fg = false;
+        } else if (code >= 90 && code <= 97) {
+            state.fg = code - 90;
+            state.default_fg = false;
+            state.bright = true;
+        } else if (code == 39) {
+            state.default_fg = true;
+            state.fg = -1;
+        }
+        if (semi == std::string::npos) break;
+        start = semi + 1;
+    }
+    return state;
+}
 
 std::size_t display_width(const std::string& s) {
     std::size_t w = 0;

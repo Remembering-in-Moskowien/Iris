@@ -77,6 +77,16 @@ void kv_table(const std::vector<std::pair<std::string, std::string>>& rows);
 void table(const std::vector<std::string>& headers,
            const std::vector<std::vector<std::string>>& rows);
 
+/// SGR 解析结果（与平台无关，便于单测）。
+struct SgrState {
+    int fg = -1;    ///< 前景色 0..7（-1 = 用终端默认）
+    bool bright = false;
+    bool default_fg = true;
+};
+
+/// 解析 SGR 参数串（如 "1;31"、"0"、"90"），在 base 基础上应用。
+SgrState parse_sgr(const std::string& params, SgrState base);
+
 /// 字符串的终端显示宽度（ASCII 1、CJK/全角 2）。
 std::size_t display_width(const std::string& s);
 

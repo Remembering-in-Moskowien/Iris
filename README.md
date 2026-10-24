@@ -321,5 +321,5 @@ MIT — 见 [LICENSE](LICENSE)。
 - 符号表：`✓ ✗ → ▶ ● ○`，`IRIS_ASCII=1` 退化为 `OK / ERR / -> / >`；
 - 结构元素：banner、小节标题、按键值对齐的表格（按显示宽度对齐，中文占 2 列）；
 - 进度：下载时显示字节/速度/ETA 进度条；流水线逐阶段打印 `▶ 阶段` 与 `✓ 阶段 1.2s`；
-- 编码：Windows 控制台一律经 `WriteConsoleW` 输出（UTF-16），**不依赖也不修改控制台代码页**，因此在 GBK（936）终端里也不会乱码；重定向/管道时输出 UTF-8 字节，可被脚本按 UTF-8 解析；`IRIS_PLAIN_OUTPUT=1` 可退回原始字节输出；
+- 编码：Windows 控制台一律经 `WriteConsoleW` 输出（UTF-16），**不依赖也不修改控制台代码页**，因此在 GBK（936）终端里也不会乱码；重定向/管道时输出 UTF-8 字节，可被脚本按 UTF-8 解析；`IRIS_PLAIN_OUTPUT=1` 可退回原始字节输出；控制台上 ANSI 颜色会被翻译成控制台属性（不依赖 VT 支持），`IRIS_FORCE_COLOR=1` 可在管道里强制保留颜色，`NO_COLOR` 仍按惯例关闭颜色；
 - 第三方推理库写到 stderr 的模型加载日志默认静音，`IRIS_VERBOSE=1` 可恢复。

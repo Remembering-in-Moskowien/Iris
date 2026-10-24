@@ -667,6 +667,38 @@ TEST_CASE("script: tokenize, similarity and timeline alignment", "[script]") {
     std::filesystem::remove(tmp);
 }
 
+TEST_CASE("ui: SGR parsing for console colours", "[ui]") {
+    using iris::ui::parse_sgr;
+    using iris::ui::SgrState;
+
+    const SgrState base{};
+    // 绿色（success）
+    auto s = parse_sgr("32", base);
+    REQUIRE(s.fg == 2);
+    REQUIRE_FALSE(s.default_fg);
+    REQUIRE_FALSE(s.bright);
+
+    // 红色加粗（error）
+    s = parse_sgr("1;31", base);
+    REQUIRE(s.fg == 1);
+    REQUIRE(s.bright);
+
+    // dim = 亮黑 90
+    s = parse_sgr("90", base);
+    REQUIRE(s.fg == 0);
+    REQUIRE(s.bright);
+
+    // 复位 0
+    s = parse_sgr("0", parse_sgr("1;31", base));
+    REQUIRE(s.default_fg);
+    REQUIRE_FALSE(s.bright);
+
+    // 22 只取消加粗，颜色保留
+    s = parse_sgr("22", parse_sgr("1;36", base));
+    REQUIRE(s.fg == 6);
+    REQUIRE_FALSE(s.bright);
+}
+
 TEST_CASE("ui: width-aware padding and human sizes", "[ui]") {
     // CJK 按 2 列宽，ASCII 按 1 列宽
     REQUIRE(iris::ui::display_width("abc") == 3);
