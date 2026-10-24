@@ -31,7 +31,7 @@ C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命�
 | 转写（云） | `Asr/CloudAsrProvider.cs`、`ProviderChain` | 无 | ❌ |
 | 分句 | `PassiveRuleSplit` / `AggressiveRuleSplit` / `LLMSplit` / `SaTSplit` + `XlmRBpeTokenizer` | 仅 rule 一种（`ops/sentence_split.cpp`） | 🟡 |
 | **说话人分割** | `DiarizationOperator`、`SpeakerProfilingOperator`、`PolyVoiceDiarizationStrategy`、`WeSpeakerDiarizationStrategy`、`DiarizationAudioPreprocessor` | ✅ `ops/diarize.cpp`（`asr --diarize`）：细网格 + 静音过滤 + 库推导 turns，写 `Sentence/Word.speaker` | ✅（P0 已接） |
-| **人声分离** | `VocalSeparationOperator`、`HtDemucsOnnxEngine`、`DemucsVocalSeparationProvider` | **无**（`ops/vsf.cpp` 是硬字幕帧检测，不是人声分离） | ❌ |
+| **人声分离** | `VocalSeparationOperator`、`HtDemucsOnnxEngine`、`DemucsVocalSeparationProvider` | ✅ `ops/vocal_separate.cpp`（`asr --separate`，HTDemucs，写 `state.vocalsPath`，预处理自动优先吃人声） | ✅（P0 已接，性能见下） |
 | 翻译（非 LLM） | `OpusMtTranslationStrategy` + 自写 `OpusMtEngine`/`OpusMtTokenizer` | `mt/translator.cpp`（CrispASR marian/m2m100） | ✅ |
 | 翻译（LLM） | `LLMTranslationStrategy`、`Llm/OpenAiCompatibleLlmProvider` | 无 | ❌ |
 | 配音合成 | `TtsSynthesisOperator` + IndexTTS/Qora/LlamaTTS provider | `ops/dub_tts.cpp` + qwen3-tts | ✅ |
@@ -85,15 +85,23 @@ C# `Centurion.Models` 里 iris 目前缺的字段：
 
 ## 5. 建议的补齐顺序
 
-| 优先级 | 内容 | 为什么现在做 | 预计 |
+| 优先级 | 内容 | 为什么现在做 | 状态 |
 |---|---|---|---|
-| **P0** | **说话人分割** | 运行时 API + 模型 + IR 字段全就绪；直接决定多音色配音与字幕标注 | 1–2 天 |
-| **P0** | **人声分离**（Demucs ONNX） | `State.vocals_path` 字段已存在；配音/转写质量的上游开关 | 1–2 天 |
-| P1 | 校正链（拼写、重叠消解、轨道自检） | 长视频字幕质量的刚需；纯文本逻辑，无模型依赖 | 2–3 天 |
-| P1 | 字幕导入（convert/combine）+ 剧本导入（from-script） | iris 目前只能「媒体→IR」，缺「已有字幕→IR」入口 | 2–3 天 |
-| P1 | OCR（VideoSubFinder 取帧 + OCR provider） | 硬字幕视频的入口；`vsf` 已实现取帧部分 | 3–5 天 |
-| P2 | 质量报告（Quality* + HTML） | 依赖校正/对齐数据先齐 | 3–5 天 |
-| P2 | LLM 翻译/分句、云 provider、REST、`migrate`、`update` | 依赖模型与密钥体系 | 按需 |
+| **P0** | **说话人分割** | 运行时 API + 模型 + IR 字段全就绪；直接决定多音色配音与字幕标注 | ✅ 已接（`asr --diarize`） |
+| **P0** | **人声分离**（HTDemucs） | `State.vocals_path` 字段已存在；配音/转写质量的上游开关 | ✅ 已接（`asr --separate`），但 CPU 上 ~19× 实时，慎用 |
+| P0 | 推理线程数修复 | 默认 `hardware_concurrency` 在混合架构 CPU 上比 8 线程慢 70–100 倍 | ✅ 已修（whisper-tiny 82.7 s → 1.08 s） |
+| P1 | 校正链（拼写、重叠消解、轨道自检） | 长视频字幕质量的刚需；纯文本逻辑，无模型依赖 | ⏳ 待做 |
+| P1 | 字幕导入（convert/combine）+ 剧本导入（from-script） | iris 目前只能「媒体→IR」，缺「已有字幕→IR」入口 | ⏳ 待做 |
+| P1 | OCR（VideoSubFinder 取帧 + OCR provider） | 硬字幕视频的入口；`vsf` 已实现取帧部分 | ⏳ 待做 |
+| P1 | dub 接入说话人（多音色） | 分割标签已有，差「按 speaker 选音色」 | ⏳ 待做 |
+| P2 | 质量报告（Quality* + HTML） | 依赖校正/对齐数据先齐 | ⏳ 待做 |
+| P2 | LLM 翻译/分句、云 provider、REST、`migrate`、`update` | 依赖模型与密钥体系 | ⏳ 待做 |
+
+### 人声分离的实测代价
+
+HTDemucs（q8_0，54 MB）在这台机器上：11 s 音频 ≈ **210 s**（≈19× 实时），
+换 `IRIS_THREADS=4/16` 无明显差别（210 s / 223 s）——瓶颈在模型本身的 CPU 算力，
+不是线程配置。因此 `--separate` 保持 opt-in，适合离线批处理，不建议放进每条短片的默认链路。
 
 ## 6. 证据附录
 

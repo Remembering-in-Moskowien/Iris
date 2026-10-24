@@ -3,6 +3,7 @@
 #include <string>
 
 #include "iris/asr/diarize.hpp"
+#include "iris/asr/separate.hpp"
 
 namespace iris::controller {
 
@@ -20,7 +21,8 @@ inline constexpr const char* kVersion = IRIS_VERSION_STRING;
 /// diarize 非空时，在分句之后追加说话人分割阶段。
 int run_asr(const std::string& input, const std::string& language, const std::string& engine,
             const std::string& model, const std::string& output,
-            const asr::DiarizeOptions* diarize = nullptr, int n_threads = 0);
+            const asr::DiarizeOptions* diarize = nullptr, int n_threads = 0,
+            const asr::SeparateOptions* separate = nullptr);
 
 /// build：IR → ASS/SRT/TXT（View 层渲染）。
 int run_build(const std::string& ir_path, const std::string& format, const std::string& output);

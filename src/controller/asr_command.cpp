@@ -12,6 +12,7 @@
 #include "iris/ops/audio_preprocess.hpp"
 #include "iris/ops/ffmpeg_convert.hpp"
 #include "iris/ops/diarize.hpp"
+#include "iris/ops/vocal_separate.hpp"
 #include "iris/ops/sentence_split.hpp"
 #include "iris/ops/transcribe.hpp"
 
@@ -21,7 +22,8 @@ namespace fs = std::filesystem;
 
 int run_asr(const std::string& input, const std::string& language, const std::string& engine,
             const std::string& model, const std::string& output,
-            const asr::DiarizeOptions* diarize, int n_threads) {
+            const asr::DiarizeOptions* diarize, int n_threads,
+            const asr::SeparateOptions* separate) {
     if (!fs::exists(input)) {
         spdlog::error("asr: 输入文件不存在: {}", input);
         return 1;
@@ -76,6 +78,9 @@ int run_asr(const std::string& input, const std::string& language, const std::st
 
     core::Pipeline pipeline;
     pipeline.add(std::make_shared<ops::FfmpegConvert>());
+    if (separate != nullptr) {
+        pipeline.add(std::make_shared<ops::VocalSeparate>(*separate));
+    }
     pipeline.add(std::make_shared<ops::AudioPreprocess>());
     pipeline.add(std::make_shared<ops::Transcribe>(
         std::make_shared<asr::AsrEngine>(backend, model, n_threads)));

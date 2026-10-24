@@ -34,13 +34,19 @@ int run(int argc, char** argv) {
     int asr_speakers = 0;
     int asr_diarize_method = 4;
     int asr_threads = 0;
+    bool asr_separate = false;
+    std::string asr_separation_model;
     asr->add_flag("--diarize", asr_diarize,
                   "Run speaker diarization after sentence splitting (labels SPEAKER_0..)");
     asr->add_option("--speaker-model", asr_speaker_model,
                     "Speaker embedding GGUF for --diarize (default: ~/.cache/crispasr/wespeaker*.gguf)");
     asr->add_option("--speakers", asr_speakers,
                     "Exact number of speakers for --diarize (0 = auto 1..8)");
-    asr->add_option("--threads", asr_threads, "Inference threads (0 = hardware concurrency)")
+    asr->add_flag("--separate", asr_separate,
+                  "Separate the vocal stem before transcription (HTDemucs)");
+    asr->add_option("--separation-model", asr_separation_model,
+                    "HTDemucs GGUF for --separate (default: ~/.cache/crispasr/htdemucs*.gguf)");
+    asr->add_option("--threads", asr_threads, "Inference threads (0 = auto, capped at 8)")
         ->capture_default_str();
     asr->add_option("--diarize-method", asr_diarize_method,
                     "Diarization method (4 = FoxNose/WeSpeaker, 5 = Sortformer, 3 = pyannote)")
@@ -174,9 +180,21 @@ int run(int argc, char** argv) {
 
     // 分发到 MVC Controller 层。
     if (asr->parsed()) {
+        asr::SeparateOptions separate_opts;
+        const asr::SeparateOptions* separate_ptr = nullptr;
+        if (asr_separate) {
+            separate_opts.model = asr_separation_model.empty() ? asr::default_separation_model()
+                                                               : asr_separation_model;
+            if (separate_opts.model.empty()) {
+                std::cerr << _("asr: --separate needs an HTDemucs model\n",
+                               "asr: --separate 需要 HTDemucs 模型\n");
+                return 1;
+            }
+            separate_ptr = &separate_opts;
+        }
         if (!asr_diarize) {
             return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output,
-                                  nullptr, asr_threads);
+                                      nullptr, asr_threads, separate_ptr);
         }
         asr::DiarizeOptions diarize;
         diarize.method = asr_diarize_method;
@@ -191,8 +209,20 @@ int run(int argc, char** argv) {
                            "或把 wespeaker*.gguf 放到 ~/.cache/crispasr）\n");
             return 1;
         }
+        if (asr_separate) {
+            separate_opts.model = asr_separation_model.empty() ? asr::default_separation_model()
+                                                               : asr_separation_model;
+            if (separate_opts.model.empty()) {
+                std::cerr << _("asr: --separate needs an HTDemucs model "
+                               "(--separation-model, or put htdemucs*.gguf in ~/.cache/crispasr)\n",
+                               "asr: --separate 需要 HTDemucs 模型（--separation-model，"
+                               "或把 htdemucs*.gguf 放到 ~/.cache/crispasr）\n");
+                return 1;
+            }
+            separate_ptr = &separate_opts;
+        }
         return controller::run_asr(asr_input, asr_lang, asr_engine, asr_model, asr_output, &diarize,
-                              asr_threads);
+                                   asr_threads, separate_ptr);
     }
     if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
     if (validate->parsed()) return controller::run_validate(v_ir);

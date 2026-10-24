@@ -243,7 +243,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 
 | 命令 | 用途 | 状态 |
 |---|---|---|
-| `asr` | 媒体 → IR（ffmpeg 转换 → 预处理 → 进程内 ASR 推理 → 分句；`--diarize` 追加说话人分割） | ✅ 已迁移 |
+| `asr` | 媒体 → IR（ffmpeg 转换 → 预处理 → 进程内 ASR 推理 → 分句；`--separate` 先分人声、`--diarize` 再分说话人） | ✅ 已迁移 |
 | `build` | IR → ASS / SRT / TXT | ✅ 已迁移 |
 | `validate` | IR 结构校验 | ✅ 已迁移 |
 | `doctor` | 环境诊断（ffmpeg / ASR / TTS 后端 / 配置） | ✅ 已迁移 |
