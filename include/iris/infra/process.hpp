@@ -22,4 +22,10 @@ Result<ProcessResult> run_process(const std::vector<std::string>& args,
                                   const std::string& cwd = "",
                                   int timeout_seconds = 0);
 
+/// 同 run_process，但 stdout 与 stderr **分开**捕获（JSON 模式下 stdout 是结果文档、
+/// stderr 是日志，两者不能混）。两侧都会在子进程运行期间被持续排空，不会因管道写满而死锁。
+Result<ProcessResult> run_process_split(const std::vector<std::string>& args,
+                                        const std::string& cwd = "",
+                                        int timeout_seconds = 0);
+
 } // namespace iris::infra

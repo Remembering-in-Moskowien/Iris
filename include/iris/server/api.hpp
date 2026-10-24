@@ -28,7 +28,9 @@ struct Job {
     std::vector<std::string> args;
     std::string state = "queued"; ///< queued | running | done | failed
     int exit_code = -1;
-    std::string output;
+    std::string output;      ///< 日志（stderr，或合并输出）
+    std::string result_json; ///< JSON 模式下子进程 stdout 的结构化结果
+    bool json = false;       ///< 该任务是否以 --json 运行
     std::string work_dir;
     std::string created_at;
     double elapsed_seconds = 0.0;
@@ -36,7 +38,7 @@ struct Job {
 
 class JobManager {
 public:
-    JobManager(std::string exe_path, std::string work_root);
+    JobManager(std::string exe_path, std::string work_root, bool json_mode = false);
     ~JobManager();
     JobManager(const JobManager&) = delete;
     JobManager& operator=(const JobManager&) = delete;
@@ -45,8 +47,10 @@ public:
     static const std::vector<std::string>& allowed_commands();
 
     /// 提交任务；返回任务 id（失败时 error 说明原因）。
+    /// json 参数为真时该任务以 --json 运行（默认跟随服务端的 --json）。
     std::optional<std::string> submit(const std::string& command,
-                                      const std::vector<std::string>& args, std::string& error);
+                                      const std::vector<std::string>& args, std::string& error,
+                                      bool json = true);
 
     /// 查询任务快照。
     std::optional<Job> get(const std::string& id);
@@ -65,6 +69,7 @@ private:
     void start_worker();
 
     std::string exe_path_;
+    bool json_mode_ = false;
     std::string work_root_;
     mutable std::mutex mutex_;
     std::deque<std::string> queue_;

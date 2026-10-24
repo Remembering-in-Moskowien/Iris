@@ -439,7 +439,9 @@ int run(int argc, char** argv) {
         return 0;
     }
     if (from_script->parsed()) return controller::run_from_script(from_script_opts);
-    if (serve->parsed()) return controller::run_serve(serve_host, serve_port, cfg.models_dir, serve_work);
+    if (serve->parsed()) {
+        return controller::run_serve(serve_host, serve_port, cfg.models_dir, serve_work, json_output);
+    }
     if (models_list->parsed()) return controller::run_models_list(cfg.models_dir);
     if (models_mirror.empty() && !cfg.hf_mirror.empty()) models_mirror = cfg.hf_mirror;
     if (models_install->parsed())

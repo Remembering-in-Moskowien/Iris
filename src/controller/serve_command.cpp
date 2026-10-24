@@ -24,7 +24,7 @@ void on_signal(int) {
 } // namespace
 
 int run_serve(const std::string& host, int port, const std::string& models_root,
-              const std::string& work_root) {
+              const std::string& work_root, bool json_mode) {
     namespace fs = std::filesystem;
 
     const std::string exe = server::executable_path();
@@ -34,7 +34,7 @@ int run_serve(const std::string& host, int port, const std::string& models_root,
         return 1;
     }
 
-    server::JobManager jobs(exe, work_root);
+    server::JobManager jobs(exe, work_root, json_mode);
     server::HttpServer http;
     server::register_api_routes(http, jobs, models_root);
 
@@ -51,6 +51,10 @@ int run_serve(const std::string& host, int port, const std::string& models_root,
                   {"GET  /models", _("model registry + installed flags", "模型注册表与安装状态")},
                   {"POST /jobs", _("submit {command, args}", "提交任务 {command, args}")},
                   {"GET  /jobs/{id}", _("job state, output, files", "任务状态、输出、产物")}});
+    if (json_mode) {
+        ui::note(_("jobs run with --json: their stdout is parsed into result",
+                   "任务以 --json 运行：子进程 stdout 会解析为 result"));
+    }
     ui::note(_("press Ctrl-C to stop", "按 Ctrl-C 停止"));
     if (!http.listen(host, port, error)) {
         std::cerr << "serve: " << error << '\n';

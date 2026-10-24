@@ -413,3 +413,19 @@ $ iris --json asr in.mp4 -l zh -o out.iris.json
   `dub`（audio）、`build`（output/format/lines）、`quality`（errors/warnings/report/tracks）、
   `ocr`（ir/cues/roi）、`from-script`（ir/lines/matched/interpolated）、`models list`（models[]）；
 - 其余命令走兜底文档，退出码始终反映真实结果。
+
+### 与 `serve` 配合
+
+`iris --json serve` 会让每个任务都以 `--json` 运行：子进程的 stdout 被解析成结构化结果放进任务对象的
+`result` 字段，stderr 作为日志放进 `output`。`POST /jobs` 可以用 `"json": false` 对单个任务关掉。
+
+`GET /jobs/{id}` 返回：
+
+```json
+{
+  "state": "done", "exitCode": 0, "json": true,
+  "result": { "ok": true, "errors": 0, "warnings": 1, "tracks": [ ] },
+  "output": "<stderr 日志>",
+  "files": [{ "name": "q.html", "bytes": 4094 }]
+}
+```

@@ -83,8 +83,8 @@ const std::vector<std::string>& JobManager::allowed_commands() {
     return kCommands;
 }
 
-JobManager::JobManager(std::string exe_path, std::string work_root)
-    : exe_path_(std::move(exe_path)), work_root_(std::move(work_root)) {
+JobManager::JobManager(std::string exe_path, std::string work_root, bool json_mode)
+    : exe_path_(std::move(exe_path)), work_root_(std::move(work_root)), json_mode_(json_mode) {
     std::error_code ec;
     fs::create_directories(work_root_, ec);
     start_worker();
@@ -105,7 +105,7 @@ void JobManager::start_worker() {
 
 std::optional<std::string> JobManager::submit(const std::string& command,
                                               const std::vector<std::string>& args,
-                                              std::string& error) {
+                                              std::string& error, bool json) {
     const auto& allowed = allowed_commands();
     if (std::find(allowed.begin(), allowed.end(), command) == allowed.end()) {
         error = "不支持的命令：" + command;
@@ -123,6 +123,7 @@ std::optional<std::string> JobManager::submit(const std::string& command,
         job.args = args;
         job.created_at = now_string();
         job.work_dir = (fs::path(work_root_) / id).string();
+        job.json = json;
     }
     std::error_code ec;
     fs::create_directories(job.work_dir, ec);
@@ -173,22 +174,49 @@ void JobManager::worker_loop() {
             }
         }
 
+        bool job_json = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (const auto& job : jobs_) {
+                if (job.id == id) {
+                    job_json = job.json;
+                    break;
+                }
+            }
+        }
+
         std::vector<std::string> argv;
         argv.push_back(exe_path_);
+        if (job_json) argv.push_back("--json"); // 全局开关，放在子命令之前
         argv.push_back(command);
         argv.insert(argv.end(), args.begin(), args.end());
 
         const auto started = std::chrono::steady_clock::now();
-        const auto r = infra::run_process(argv, work_dir);
+        const auto r = infra::run_process_split(argv, work_dir);
         const auto elapsed =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
 
         std::string output;
+        std::string result_json;
         int exit_code = -1;
         if (r.ok()) {
-            output = r.value().stdout_text;
-            if (output.size() > 32 * 1024) output = output.substr(output.size() - 32 * 1024);
             exit_code = r.value().exit_code;
+            // stderr 是日志；stdout 在 JSON 模式下是结果文档
+            output = r.value().stderr_text;
+            if (output.size() > 32 * 1024) output = output.substr(output.size() - 32 * 1024);
+            if (job_json) {
+                const std::string& stdout_text = r.value().stdout_text;
+                if (!stdout_text.empty() && nlohmann::json::accept(stdout_text)) {
+                    result_json = stdout_text;
+                } else {
+                    // 子进程没输出合法 JSON（可能被信号杀掉）：补一个兜底文档
+                    result_json =
+                        nlohmann::json({{"ok", exit_code == 0}, {"exitCode", exit_code}}).dump();
+                }
+            } else {
+                output = r.value().stdout_text + output;
+                if (output.size() > 32 * 1024) output = output.substr(output.size() - 32 * 1024);
+            }
         } else {
             output = "进程启动失败";
         }
@@ -200,6 +228,7 @@ void JobManager::worker_loop() {
                 job.exit_code = exit_code;
                 job.state = exit_code == 0 ? "done" : "failed";
                 job.output = std::move(output);
+                job.result_json = std::move(result_json);
                 job.elapsed_seconds = elapsed;
                 break;
             }
@@ -257,6 +286,10 @@ std::string JobManager::to_json(const Job& job, bool include_files) const {
     j["elapsedSeconds"] = job.elapsed_seconds;
     j["workDir"] = job.work_dir;
     j["output"] = job.output;
+    j["json"] = job.json;
+    if (!job.result_json.empty() && nlohmann::json::accept(job.result_json)) {
+        j["result"] = nlohmann::json::parse(job.result_json);
+    }
     if (include_files) {
         auto files_json = nlohmann::json::array();
         for (const auto& [name, size] : files(job.id)) {
@@ -322,7 +355,8 @@ void register_api_routes(HttpServer& server, JobManager& jobs, const std::string
             }
         }
         std::string error;
-        const auto id = jobs.submit(command, args, error);
+        const bool json_flag = body.value("json", true); // 默认跟随服务端 --json
+        const auto id = jobs.submit(command, args, error, json_flag);
         if (!id) {
             nlohmann::json j;
             j["error"] = error;
