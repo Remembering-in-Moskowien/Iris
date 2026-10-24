@@ -4,10 +4,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <thread>
 
 #include "iris/infra/process.hpp"
 #include "iris/infra/threads.hpp"
+#include "iris/tts/qwen3_session.hpp"
 #include "iris/tts/timestretch.hpp"
 #include <spdlog/fmt/fmt.h>
 
@@ -77,6 +79,54 @@ bool tts_engine_available(TtsEngine engine) {
 
 // 供各引擎实现复用的线程数解析。
 int resolve_tts_threads(int requested) { return infra::resolve_threads(requested); }
+
+// ---------------------------------------------------------------------------
+// 复用型会话
+// ---------------------------------------------------------------------------
+struct TtsSession::Impl {
+    TtsRequest req;
+    std::unique_ptr<Qwen3Session> qwen; ///< 仅 qwen3-tts 有可复用会话
+};
+
+TtsSession::TtsSession() : impl_(std::make_unique<Impl>()) {}
+TtsSession::~TtsSession() = default;
+
+bool TtsSession::open(const TtsRequest& req, std::string& error) {
+    impl_->req = req;
+    impl_->qwen.reset();
+
+    if (!tts_engine_available(req.engine)) {
+        error = std::string("tts: 引擎 '") + tts_engine_name(req.engine) +
+                "' 的推理运行时未随本次构建提供";
+        return false;
+    }
+    if (req.engine == TtsEngine::Qwen3Tts) {
+        impl_->qwen = std::make_unique<Qwen3Session>();
+        if (!qwen3_open(req, *impl_->qwen, error)) {
+            impl_->qwen.reset();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool TtsSession::synthesize(const std::string& text, TtsResult& out, std::string& error) {
+    out = TtsResult{};
+    if (text.empty()) {
+        error = "tts: 待合成文本为空";
+        return false;
+    }
+    if (impl_->qwen) return qwen3_synthesize(*impl_->qwen, text, out, error);
+
+    // 其它引擎没有可复用会话：退回一次性路径。
+    TtsRequest req = impl_->req;
+    req.text = text;
+    return synth_indextts(req, out, error);
+}
+
+bool TtsSession::is_open() const { return impl_ != nullptr && impl_->qwen != nullptr; }
+
+const TtsRequest& TtsSession::request() const { return impl_->req; }
 
 // ---------------------------------------------------------------------------
 // 分发

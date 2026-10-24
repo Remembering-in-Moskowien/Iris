@@ -10,6 +10,7 @@
 #include "iris/asr/onnx.hpp"
 #include "iris/infra/log.hpp"
 #include "iris/infra/threads.hpp"
+#include <ctranslate2/replica_pool.h>
 
 #if IRIS_HAS_CRISPASR
 #include "crispasr.h"
@@ -176,7 +177,7 @@ std::vector<Ct2Segment> parse_ct2_tokens(const std::vector<std::size_t>& ids,
 
 bool transcribe_ct2(const std::string& model_path, const std::string& audio_path,
                     const std::string& language, std::vector<model::Sentence>& out,
-                    std::string& error) {
+                    std::string& error, int n_threads_override) {
     try {
         // 进程内读取 16 kHz 单声道 WAV。
         std::vector<float> samples;
@@ -195,8 +196,14 @@ bool transcribe_ct2(const std::string& model_path, const std::string& audio_path
         const std::size_t ts_begin = vocab.to_id("<|0.00|>"); // 时间戳 token 起始 id（词表 50364）
         const std::size_t eot_id = vocab.to_id("<|endoftext|>");
 
+        // 线程数显式配置：CT2 默认会吃满所有逻辑核，在混合架构 CPU 上反而慢一个数量级。
+        ctranslate2::ReplicaPoolConfig pool_cfg;
+        pool_cfg.num_threads_per_replica =
+            static_cast<std::size_t>(infra::resolve_threads(n_threads_override));
+        spdlog::info("ct2: 线程数 {}", pool_cfg.num_threads_per_replica);
         ctranslate2::models::Whisper pool(model_path, ctranslate2::Device::CPU,
-                                          ctranslate2::ComputeType::DEFAULT, std::vector<int>{0});
+                                          ctranslate2::ComputeType::DEFAULT, std::vector<int>{0},
+                                          /*tensor_parallel=*/false, pool_cfg);
         const std::size_t n_mels = pool.n_mels();
 
         // 语言 token（与 faster-whisper 的 sot_sequence 一致）。
@@ -274,7 +281,7 @@ bool transcribe_ct2(const std::string& model_path, const std::string& audio_path
 #else
 bool transcribe_ct2(const std::string& /*model_path*/, const std::string& /*audio_path*/,
                     const std::string& /*language*/, std::vector<model::Sentence>& /*out*/,
-                    std::string& error) {
+                    std::string& error, int /*n_threads_override*/) {
     error = "ct2: 运行时 DLL 未就绪（tools/runtimes/ct2 缺失，先放入打包好的 ctranslate2.dll）";
     return false;
 }
@@ -326,7 +333,7 @@ bool AsrEngine::transcribe(const std::string& audio_path, const std::string& lan
         case AsrBackend::Qwen3AsrGgml:
             return transcribe_crispasr(backend_, model_path_, audio_path, language, out, error, n_threads_);
         case AsrBackend::WhisperCt2:
-            return transcribe_ct2(model_path_, audio_path, language, out, error);
+            return transcribe_ct2(model_path_, audio_path, language, out, error, n_threads_);
         case AsrBackend::WhisperOnnx:
             return transcribe_onnx(model_path_, audio_path, language, out, error);
     }

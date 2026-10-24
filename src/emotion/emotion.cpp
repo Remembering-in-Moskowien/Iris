@@ -19,6 +19,7 @@
 
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/threads.hpp"
 
 #if IRIS_HAS_ONNX
 #include <onnxruntime_cxx_api.h>
@@ -97,7 +98,7 @@ bool analyze_emotion(const std::string& onnx_path,
 
     Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "iris-emotion");
     Ort::SessionOptions so_opts;
-    so_opts.SetIntraOpNumThreads(4);
+    so_opts.SetIntraOpNumThreads(infra::resolve_threads(0));
     std::wstring wpath;
     for (const char c : onnx_path) wpath.push_back(static_cast<wchar_t>(static_cast<unsigned char>(c)));
     std::unique_ptr<Ort::Session> session;

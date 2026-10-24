@@ -81,6 +81,16 @@ bool DubTts::execute(core::PipelineContext& ctx) {
     const fs::path out =
         opts_.output_path.empty() ? fs::path(ctx.work_dir) / kDubFileName : fs::path(opts_.output_path);
 
+    // 一次打开会话（加载模型 + 编码参考音频），逐句只做推理。
+    tts::TtsSession session;
+    {
+        std::string open_error;
+        if (!session.open(opts_.request, open_error)) {
+            spdlog::error("dub_tts: {}", open_error);
+            return false;
+        }
+    }
+
     std::vector<float> timeline;
     int sample_rate = 0;
     int done = 0;
@@ -91,12 +101,9 @@ bool DubTts::execute(core::PipelineContext& ctx) {
     for (std::size_t i = 0; i < cues.size(); ++i) {
         const Cue& cue = cues[i];
 
-        tts::TtsRequest req = opts_.request;
-        req.text = cue.text;
-
         tts::TtsResult result;
         std::string error;
-        if (!tts::synthesize(req, result, error)) {
+        if (!session.synthesize(cue.text, result, error)) {
             spdlog::error("dub_tts: 第 {}/{} 句合成失败：{}", i + 1, total, error);
             return false;
         }

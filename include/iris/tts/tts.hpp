@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -60,6 +61,31 @@ struct TtsResult {
 
 /// 按请求合成。失败时 error 写入人类可读原因（已含引擎前缀）。
 bool synthesize(const TtsRequest& req, TtsResult& out, std::string& error);
+
+/// 复用型 TTS 会话：**打开一次**（加载模型 + 编码参考音频），然后逐句合成。
+///
+/// dub 逐句配音必须用它：一次性 `synthesize()` 每句都会重新加载模型、重新编码
+/// 参考音频（qwen3-tts 上每句 ≈2 s 纯开销），多句时占比很高。
+class TtsSession {
+public:
+    TtsSession();
+    ~TtsSession();
+    TtsSession(const TtsSession&) = delete;
+    TtsSession& operator=(const TtsSession&) = delete;
+
+    /// 打开引擎会话（模型/音色/语言等都在这里生效）。
+    bool open(const TtsRequest& req, std::string& error);
+
+    /// 用已打开的会话合成一句（request 里的 text 字段被忽略）。
+    bool synthesize(const std::string& text, TtsResult& out, std::string& error);
+
+    [[nodiscard]] bool is_open() const;
+    [[nodiscard]] const TtsRequest& request() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 // ---- 引擎专用入口（由 synthesize 分发；一般不必直接调用）------------------
 bool synth_qwen3_tts(const TtsRequest& req, TtsResult& out, std::string& error);

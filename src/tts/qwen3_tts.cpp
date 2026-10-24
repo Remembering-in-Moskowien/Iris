@@ -21,6 +21,7 @@
 
 #include "iris/infra/log.hpp"
 #include "iris/tts/gguf.hpp"
+#include "iris/tts/qwen3_session.hpp"
 #include "iris/tts/tts.hpp"
 
 #if IRIS_HAS_CRISPASR
@@ -68,7 +69,13 @@ std::string detect_backend(const std::string& model) {
 } // namespace
 #endif
 
-bool synth_qwen3_tts(const TtsRequest& req, TtsResult& out, std::string& error) {
+Qwen3Session::~Qwen3Session() {
+#if IRIS_HAS_CRISPASR
+    if (session != nullptr) crispasr_session_close(static_cast<crispasr_session*>(session));
+#endif
+}
+
+bool qwen3_open(const TtsRequest& req, Qwen3Session& out, std::string& error) {
 #if !IRIS_HAS_CRISPASR
     (void)req;
     (void)out;
@@ -116,22 +123,24 @@ bool synth_qwen3_tts(const TtsRequest& req, TtsResult& out, std::string& error) 
         model_gguf.get_int("qwen3tts.n_codebooks"));
 
     const std::string backend = detect_backend(req.model);
-    SessionPtr session{crispasr_session_open_explicit(
-        req.model.c_str(), backend.c_str(), resolve_tts_threads(req.n_threads))};
-    if (!session) {
+    auto* raw = crispasr_session_open_explicit(req.model.c_str(), backend.c_str(),
+                                               resolve_tts_threads(req.n_threads));
+    if (raw == nullptr) {
         error = fmt::format("qwen3-tts: 无法加载模型 {}（后端 {}）", req.model, backend);
         return false;
     }
 
-    if (crispasr_session_set_codec_path(session.get(), req.codec_model.c_str()) != 0) {
+    out.session = raw;
+    out.backend = backend;
+    if (crispasr_session_set_codec_path(raw, req.codec_model.c_str()) != 0) {
         error = "qwen3-tts: tokenizer/codec 加载失败: " + req.codec_model;
         return false;
     }
     if (!req.language.empty() && req.language != "auto") {
-        crispasr_session_set_source_language(session.get(), req.language.c_str());
+        crispasr_session_set_source_language(raw, req.language.c_str());
     }
-    if (req.steps > 0) crispasr_session_set_tts_steps(session.get(), req.steps);
-    if (req.cfg_scale > 0.0f) crispasr_session_set_tts_cfg_scale(session.get(), req.cfg_scale);
+    if (req.steps > 0) crispasr_session_set_tts_steps(raw, req.steps);
+    if (req.cfg_scale > 0.0f) crispasr_session_set_tts_cfg_scale(raw, req.cfg_scale);
 
     if (!req.ref_wav.empty()) {
         // qwen3-tts 的 speaker encoder 只接受 24 kHz 参考音频；其它采样率先归一再加载。
@@ -146,7 +155,7 @@ bool synth_qwen3_tts(const TtsRequest& req, TtsResult& out, std::string& error) 
         }
 
         const int rc = crispasr_session_set_voice(
-            session.get(), ref_path.c_str(), req.ref_text.empty() ? nullptr : req.ref_text.c_str());
+            raw, ref_path.c_str(), req.ref_text.empty() ? nullptr : req.ref_text.c_str());
         if (rc != 0) {
             error = fmt::format("qwen3-tts: 参考音频加载失败（{}，rc={}）{}", req.ref_wav, rc,
                                 req.ref_text.empty() ? "；用 WAV 克隆时必须同时给 --ref-text（参考音频逐字稿）"
@@ -155,25 +164,54 @@ bool synth_qwen3_tts(const TtsRequest& req, TtsResult& out, std::string& error) 
         }
     }
 
-    int n_samples = 0;
-    PcmPtr pcm{crispasr_session_synthesize(session.get(), req.text.c_str(), &n_samples)};
-    if (!pcm || n_samples <= 0) {
-        const char* why = crispasr_session_last_synth_error(session.get());
-        error = std::string("qwen3-tts: 合成失败") + (why != nullptr && *why != '\0' ? std::string("：") + why : "");
+    out.sample_rate = crispasr_session_output_sample_rate(raw);
+    if (out.sample_rate <= 0) out.sample_rate = kRefSampleRate;
+    spdlog::info("qwen3-tts: 会话就绪（后端 {}，输出 {} Hz）", backend, out.sample_rate);
+    return true;
+#endif
+}
+
+bool qwen3_synthesize(Qwen3Session& session, const std::string& text, TtsResult& out,
+                      std::string& error) {
+#if !IRIS_HAS_CRISPASR
+    (void)session;
+    (void)text;
+    (void)out;
+    error = "qwen3-tts: CrispASR 运行时 DLL 未就绪";
+    return false;
+#else
+    if (session.session == nullptr) {
+        error = "qwen3-tts: 会话未打开";
         return false;
     }
+    auto* raw = static_cast<crispasr_session*>(session.session);
 
-    const int sample_rate = crispasr_session_output_sample_rate(session.get());
-    if (sample_rate <= 0) {
-        error = "qwen3-tts: 后端未报告输出采样率";
+    int n_samples = 0;
+    PcmPtr pcm{crispasr_session_synthesize(raw, text.c_str(), &n_samples)};
+    if (!pcm || n_samples <= 0) {
+        const char* why = crispasr_session_last_synth_error(raw);
+        error = std::string("qwen3-tts: 合成失败") +
+                (why != nullptr && *why != '\0' ? std::string("：") + why : "");
         return false;
     }
 
     out.pcm.assign(pcm.get(), pcm.get() + n_samples);
-    out.sample_rate = sample_rate;
-    spdlog::info("qwen3-tts: {} 采样 @ {} Hz（后端 {}）", out.pcm.size(), sample_rate, backend);
+    out.sample_rate = session.sample_rate > 0 ? session.sample_rate
+                                              : crispasr_session_output_sample_rate(raw);
+    if (out.sample_rate <= 0) {
+        error = "qwen3-tts: 后端未报告输出采样率";
+        return false;
+    }
+    spdlog::info("qwen3-tts: {} 采样 @ {} Hz（后端 {}）", out.pcm.size(), out.sample_rate,
+                 session.backend);
     return true;
 #endif
+}
+
+bool synth_qwen3_tts(const TtsRequest& req, TtsResult& out, std::string& error) {
+    Qwen3Session session;
+    if (!qwen3_open(req, session, error)) return false;
+    return qwen3_synthesize(session, req.text, out, error);
 }
 
 } // namespace iris::tts

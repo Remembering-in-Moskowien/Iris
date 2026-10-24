@@ -27,6 +27,7 @@
 #include "iris/asr/ct2_mel.hpp"
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/threads.hpp"
 
 #if IRIS_HAS_ONNX
 #include <onnxruntime_cxx_api.h>
@@ -282,8 +283,9 @@ bool transcribe_onnx_impl(const std::string& model_dir, const std::string& audio
 
     static Ort::Env env(ORT_LOGGING_LEVEL_WARNING, "iris-asr");
     Ort::SessionOptions enc_opts, dec_opts;
-    enc_opts.SetIntraOpNumThreads(0);
-    dec_opts.SetIntraOpNumThreads(0);
+    const int onnx_threads = infra::resolve_threads(0);
+    enc_opts.SetIntraOpNumThreads(onnx_threads);
+    dec_opts.SetIntraOpNumThreads(onnx_threads);
     enc_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
     dec_opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
 #ifdef IRIS_ONNX_CUDA
