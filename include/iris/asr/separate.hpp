@@ -16,6 +16,7 @@ struct SeparateOptions {
     std::string model;      ///< htdemucs GGUF
     std::string stem = "vocals"; ///< 要取出的 stem（vocals/drums/bass/other）
     int n_threads = 0;
+    int chunk_seconds = 16; ///< 分块长度（重叠 1 s）；更小块=更多并行、更多边界拼接
 };
 
 /// 分离指定 stem，输出 16 kHz 单声道 WAV（下游 ASR/TTS 统一吃这个格式）。

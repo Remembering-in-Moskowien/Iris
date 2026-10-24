@@ -36,6 +36,7 @@ int run(int argc, char** argv) {
     int asr_threads = 0;
     bool asr_separate = false;
     std::string asr_separation_model;
+    int asr_sep_chunk = 16;
     asr->add_flag("--diarize", asr_diarize,
                   "Run speaker diarization after sentence splitting (labels SPEAKER_0..)");
     asr->add_option("--speaker-model", asr_speaker_model,
@@ -44,6 +45,9 @@ int run(int argc, char** argv) {
                     "Exact number of speakers for --diarize (0 = auto 1..8)");
     asr->add_flag("--separate", asr_separate,
                   "Separate the vocal stem before transcription (HTDemucs)");
+    asr->add_option("--separation-chunk", asr_sep_chunk,
+                    "Separation chunk seconds (more chunks = more parallelism)")
+        ->capture_default_str();
     asr->add_option("--separation-model", asr_separation_model,
                     "HTDemucs GGUF for --separate (default: ~/.cache/crispasr/htdemucs*.gguf)");
     asr->add_option("--threads", asr_threads, "Inference threads (0 = auto, capped at 8)")
@@ -185,6 +189,7 @@ int run(int argc, char** argv) {
         if (asr_separate) {
             separate_opts.model = asr_separation_model.empty() ? asr::default_separation_model()
                                                                : asr_separation_model;
+            separate_opts.chunk_seconds = asr_sep_chunk;
             if (separate_opts.model.empty()) {
                 std::cerr << _("asr: --separate needs an HTDemucs model\n",
                                "asr: --separate 需要 HTDemucs 模型\n");
@@ -212,6 +217,7 @@ int run(int argc, char** argv) {
         if (asr_separate) {
             separate_opts.model = asr_separation_model.empty() ? asr::default_separation_model()
                                                                : asr_separation_model;
+            separate_opts.chunk_seconds = asr_sep_chunk;
             if (separate_opts.model.empty()) {
                 std::cerr << _("asr: --separate needs an HTDemucs model "
                                "(--separation-model, or put htdemucs*.gguf in ~/.cache/crispasr)\n",
