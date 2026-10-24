@@ -43,8 +43,15 @@
   （rule 策略，标点边界 + 最大长度硬切，子句时间轴按比例分配）、`SubtitleBuild`。
 - **提供者**：`CrispAsr`（内嵌 CrispASR / CTranslate2，进程内推理；
   不再调用 whisper-cli 等外部 ASR 可执行文件）。
-- **CLI**：`asr` / `build` / `validate` / `doctor` / `models list` / `init`(stub)。
-- **测试**：时间码、ASS/SRT 渲染、IR 序列化往返与校验。
+- **CLI**：`asr` / `build` / `validate` / `doctor` / `models list` / `tts` / `dub` / `emotion` / `init`(stub)。
+- **TTS 后端**：`qwen3-tts`（CrispASR 进程内，Qwen3-TTS 12Hz GGUF + tokenizer GGUF，已端到端可用）、
+  `indextts`（onnxruntime，9 图加载 + 目录校验完成，编排未接通）。
+- **配音链路**：`DubTts` 把 IR 句子逐条 TTS 并按时间码铺到一条 WAV 上（含时长对齐）；
+  `AnalyzeEmotion` 在链路中做 6 类情感分析留痕（尚未驱动 TTS 风格）。
+- **自研运行时**：GGUF 解析（`tts --inspect`）+ 自研 WSOLA 变速已落地；Qwen3-TTS 推理
+  按 P1–P5 推进（见 README）。
+- **测试**：时间码、ASS/SRT 渲染、IR 序列化往返与校验、TTS 引擎解析 / WAV 读写 /
+  配音时间轴 / WSOLA / GGUF 解析。
 - **CI**：GitHub Actions 双平台（Ubuntu gcc / Windows MSVC）构建 + ctest。
 
 ## 4. 迁移路线图
@@ -55,8 +62,9 @@
    翻译/配音参数、质量报告参数），保证 `migrate` 命令可双向读取 C# 版 IR。
 2. **OCR 链路**：VideoSubFinder 取帧 → RapidOCR/GLM-OCR（本地 ONNX / 云 API）→ 烧录字幕。
 3. **翻译链路**：`Translate` 操作符 + LLM provider 抽象（11+ 提供者，glossary，目标文字对齐）。
-4. **配音链路**：`Dub` 操作符 + TTS provider（Qwen3-TTS / QORA-TTS / IndexTTS），
-   时间对齐与混音（rubberband / atempo）。
+4. **配音链路**：`DubTts` + qwen3-tts 已落地（逐句合成 + 时间轴铺轨 + 时长对齐：
+   静音裁剪 → 自研 WSOLA 变速压进原句时隙 → 超出部分顺延下一句，句间保底 200 ms 停顿）；
+   自研 Qwen3-TTS 运行时按 P1–P5 推进（GGUF 解析已落地）；待补：译文轨道、成片混音封装。
 5. **说话人分离**：`Diarization` 操作符（foxnose / WeSpeaker 嵌入）。
 6. **质量报告**：`QualityAssessor` / `QualityHtmlReport` → HTML 报告生成。
 7. **REST API**：`serve` 命令（cpp-httplib 替代 ASP.NET Core in-process）。
@@ -74,6 +82,9 @@
 
 ## 6. 验证
 
-- 单元测试：`ctest --test-dir build --output-on-failure`（时间码 / 渲染 / IR 往返）。
+- 单元测试：`ctest --test-dir build --output-on-failure`（时间码 / 渲染 / IR 往返 /
+  TTS 与时间轴 / WSOLA / GGUF）。
 - CI：push/PR 触发双平台构建 + 测试。
 - 端到端（本地）：`iris asr <media> --model <ggml>.bin` → `iris build out.iris.json`。
+- 配音端到端（本地）：`iris dub <media> -m qwen3-tts-q8_0.gguf --codec qwen3-tts-tokenizer-12hz.gguf ...`
+  → `dub.wav`，或直接跑 `scripts/verify-dub.ps1`（见 README「配音链路」）。
