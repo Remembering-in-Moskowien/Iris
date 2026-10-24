@@ -59,6 +59,7 @@ add_library(iris_core
     src/text/cleanup.cpp
     src/text/sat.cpp
     src/ocr/rapid_ocr.cpp
+    src/quality/report.cpp
     src/subtitle/parser.cpp
     src/subtitle/combine.cpp
     src/asr/asr.cpp
@@ -126,7 +127,8 @@ add_executable(iris
     src/controller/translate_command.cpp
     src/controller/correct_command.cpp
     src/controller/subtitle_command.cpp
-    src/controller/ocr_command.cpp)
+    src/controller/ocr_command.cpp
+    src/controller/quality_command.cpp)
 target_link_libraries(iris PRIVATE iris_core CLI11::CLI11)
 target_compile_options(iris PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 set_target_properties(iris PROPERTIES

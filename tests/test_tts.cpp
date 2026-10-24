@@ -10,6 +10,7 @@
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/ocr/rapid_ocr.hpp"
+#include "iris/quality/report.hpp"
 #include "iris/ops/dub_tts.hpp"
 #include "iris/ops/sentence_split.hpp"
 #include "iris/subtitle/combine.hpp"
@@ -595,6 +596,56 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("quality: metrics, issue detection and HTML escaping", "[quality]") {
+    iris::model::IrDocument doc;
+    doc.config.language = "zh";
+    doc.generator.input_file = "in.mp4";
+    doc.generator.command = "asr";
+
+    iris::model::Track track;
+    track.type = "transcribe";
+    track.language = "zh";
+
+    auto add = [&](std::int64_t s, std::int64_t e, const std::string& text,
+                   const std::string& speaker = "") {
+        iris::model::Sentence sent;
+        sent.start_ms = s;
+        sent.end_ms = e;
+        sent.text = text;
+        if (!speaker.empty()) sent.speaker = speaker;
+        track.sentences.push_back(sent);
+    };
+
+    add(0, 1000, "一二三四五六七八九十一二三四五六七八九十"); // 20 字 / 1 s → 20 CPS
+    add(500, 2000, "重叠的一句话");                          // 与上一条重叠 500ms
+    add(2000, 3000, "重叠的一句话");                          // 重复文本
+    add(3000, 3000, "");                                     // 空字幕
+    add(3000, 4000, "<b>html</b> & 符号", "SPEAKER_1");
+    doc.state.tracks.push_back(track);
+
+    const auto report = iris::quality::analyze(doc);
+    REQUIRE(report.tracks.size() == 1);
+    const auto& m = report.tracks[0];
+    REQUIRE(m.cues == 5);
+    REQUIRE(m.overlaps == 1);
+    REQUIRE(m.duplicates == 1);
+    REQUIRE(m.empty_cues == 1);
+    REQUIRE(m.fast_cues == 2); // 第一条 20 CPS；最后一条 16 字符 / 1 s = 16 CPS
+    REQUIRE(m.speakers.size() == 1);
+    REQUIRE(m.speakers.at("SPEAKER_1") == 1);
+    REQUIRE(report.errors == 2);   // overlap + empty
+    REQUIRE(report.warnings == 3); // fast x2 + duplicate
+
+    // CPS 上限按语言区分
+    REQUIRE(iris::quality::max_cps_for("zh") == 12.0);
+    REQUIRE(iris::quality::max_cps_for("en") == 20.0);
+
+    // HTML 转义：文本里的标签必须被转义
+    const std::string html = iris::quality::to_html(doc, report);
+    REQUIRE(html.find("<b>html</b>") == std::string::npos);
+    REQUIRE(html.find("&lt;b&gt;html&lt;/b&gt;") != std::string::npos);
 }
 
 TEST_CASE("ocr: detection boxes and CTC decoding", "[ocr]") {

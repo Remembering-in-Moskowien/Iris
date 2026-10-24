@@ -119,6 +119,9 @@ struct OcrCommandOptions {
     double sample_fps = 1.0;
 };
 
+/// quality：统计 IR 的字幕质量指标并渲染 HTML 报告（有 error 时返回 2）。
+int run_quality(const std::string& ir_path, const std::string& out_html);
+
 /// ocr：从视频硬字幕提取文本 → IR（vsf 找字幕段 + PP-OCR 识别）。
 int run_ocr(const OcrCommandOptions& options);
 

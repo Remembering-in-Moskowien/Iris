@@ -210,6 +210,13 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- quality ----
+    auto* quality = app.add_subcommand(
+        "quality", "Analyse an IR and write a self-contained HTML quality report");
+    std::string quality_ir, quality_out;
+    quality->add_option("ir", quality_ir, "IR file (*.iris.json)")->required();
+    quality->add_option("--out,-o", quality_out, "Output HTML path (default: <ir>.quality.html)");
+
     // ---- ocr ----
     auto* ocr = app.add_subcommand("ocr", "Extract hard-coded subtitles from a video into an IR");
     controller::OcrCommandOptions ocr_opts;
@@ -326,6 +333,7 @@ int run(int argc, char** argv) {
     }
     if (translate->parsed()) return controller::run_translate(translate_opts);
     if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (quality->parsed()) return controller::run_quality(quality_ir, quality_out);
     if (ocr->parsed()) return controller::run_ocr(ocr_opts);
     if (convert->parsed()) return controller::run_convert(convert_inputs, convert_lang, convert_out);
     if (combine->parsed())
