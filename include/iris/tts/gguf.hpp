@@ -43,6 +43,7 @@ struct TensorInfo {
 struct File {
     std::uint32_t version = 0;
     std::uint64_t tensor_count = 0;
+    std::uint64_t data_offset = 0; ///< 张量数据区在文件中的起始偏移（已按 alignment 对齐）
     std::vector<std::pair<std::string, MetaValue>> meta;
     std::vector<TensorInfo> tensors;
 
@@ -53,6 +54,8 @@ struct File {
     [[nodiscard]] double get_float(const std::string& key, double fallback = 0.0) const;
     /// 名字里包含 needle 的张量（用于按前缀统计 transformer 层）。
     [[nodiscard]] std::vector<const TensorInfo*> find_tensors(const std::string& needle) const;
+    /// 按名字精确查找张量。
+    [[nodiscard]] const TensorInfo* tensor(const std::string& name) const;
 };
 
 /// 读取 GGUF 目录。失败时 error 说明原因（magic/版本/截断）。
@@ -63,5 +66,9 @@ const char* type_name(std::uint32_t type);
 
 /// 每元素字节数估算（用于校验文件大小是否自洽）；未知类型返回 0。
 double bytes_per_element(std::uint32_t type);
+
+/// 一个量化块的元素数与字节数（未量化类型：块大小 1）。
+std::uint32_t block_elems(std::uint32_t type);
+std::size_t block_bytes(std::uint32_t type);
 
 } // namespace iris::tts::gguf

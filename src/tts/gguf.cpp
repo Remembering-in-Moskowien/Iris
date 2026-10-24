@@ -175,6 +175,13 @@ std::vector<const TensorInfo*> File::find_tensors(const std::string& needle) con
     return hits;
 }
 
+const TensorInfo* File::tensor(const std::string& name) const {
+    for (const auto& t : tensors) {
+        if (t.name == name) return &t;
+    }
+    return nullptr;
+}
+
 bool load(const std::string& path, File& out, std::string& error) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
@@ -242,6 +249,12 @@ bool load(const std::string& path, File& out, std::string& error) {
             return false;
         }
     }
+
+    // 张量数据区紧跟在张量表之后，按 general.alignment 对齐（默认 32）。
+    const std::int64_t alignment = out.get_int("general.alignment", 32);
+    const auto align = static_cast<std::uint64_t>(alignment > 0 ? alignment : 32);
+    const auto pos = static_cast<std::uint64_t>(f.tellg());
+    out.data_offset = (pos + align - 1) / align * align;
     return true;
 }
 
@@ -281,6 +294,37 @@ double bytes_per_element(std::uint32_t type) {
         case 13: return 0.6875;                 // Q5_K
         case 14: return 0.8125;                 // Q6_K
         default: return 0.0;
+    }
+}
+
+std::uint32_t block_elems(std::uint32_t type) {
+    switch (type) {
+        case 0: return 1;   // F32
+        case 1: return 1;   // F16
+        case 30: return 1;  // BF16
+        case 2: case 3: case 6: case 7: case 8: case 9: return 32;
+        case 10: case 11: case 12: case 13: case 14: return 256;
+        default: return 0;
+    }
+}
+
+std::size_t block_bytes(std::uint32_t type) {
+    switch (type) {
+        case 0: return 4;    // F32
+        case 1: return 2;    // F16
+        case 30: return 2;   // BF16
+        case 2: return 18;   // Q4_0: f16 d + 16 B
+        case 3: return 20;   // Q4_1: f16 d + f16 m + 16 B
+        case 6: return 22;   // Q5_0: f16 d + 4 B qh + 16 B
+        case 7: return 24;   // Q5_1
+        case 8: return 34;   // Q8_0: f16 d + 32×int8
+        case 9: return 36;   // Q8_1
+        case 10: return 84;  // Q2_K
+        case 11: return 110; // Q3_K
+        case 12: return 144; // Q4_K
+        case 13: return 176; // Q5_K
+        case 14: return 210; // Q6_K
+        default: return 0;
     }
 }
 

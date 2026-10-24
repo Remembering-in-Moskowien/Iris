@@ -8,6 +8,8 @@
 
 #include "iris/model/ir_document.hpp"
 #include "iris/tts/gguf.hpp"
+#include "iris/tts/kernels.hpp"
+#include "iris/tts/tensor.hpp"
 #include "iris/tts/timestretch.hpp"
 #include "iris/tts/tts.hpp"
 
@@ -148,6 +150,137 @@ TEST_CASE("GGUF parser reads the qwen3-tts talker weights", "[gguf]") {
     // 权重要能定位到 talker 主体（自研运行时按名前缀取张量）。
     REQUIRE_FALSE(f.find_tensors("talker").empty());
     REQUIRE(std::string(iris::tts::gguf::type_name(8)) == "Q8_0");
+}
+
+TEST_CASE("half and Q8_0 dequant match hand-computed values", "[tensor]") {
+    // IEEE 半精度：1.0 / 0.5 / -2.0
+    REQUIRE(iris::tts::f16_to_f32(0x3C00) == 1.0f);
+    REQUIRE(iris::tts::f16_to_f32(0x3800) == 0.5f);
+    REQUIRE(iris::tts::f16_to_f32(0xC000) == -2.0f);
+    REQUIRE(iris::tts::f16_to_f32(0x0000) == 0.0f);
+
+    // 块大小与字节数要和 ggml 对齐
+    REQUIRE(iris::tts::gguf::block_elems(8) == 32);
+    REQUIRE(iris::tts::gguf::block_bytes(8) == 34);
+    REQUIRE(iris::tts::gguf::block_elems(12) == 256);
+    REQUIRE(iris::tts::gguf::block_bytes(12) == 144);
+
+    // Q8_0 块：f16 尺度 0.5 + 32 个 int8
+    std::vector<std::uint8_t> block(34, 0);
+    const std::uint16_t scale = 0x3800; // 0.5
+    std::memcpy(block.data(), &scale, 2);
+    for (int i = 0; i < 32; ++i) {
+        block[2 + static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(static_cast<std::int8_t>(i));
+    }
+    std::vector<float> out;
+    std::string error;
+    REQUIRE(iris::tts::dequantize(block.data(), block.size(), 8, 32, out, error));
+    REQUIRE(out.size() == 32);
+    for (int i = 0; i < 32; ++i) REQUIRE(out[static_cast<std::size_t>(i)] == 0.5f * i);
+
+    // 截断的数据必须报错
+    REQUIRE_FALSE(iris::tts::dequantize(block.data(), 10, 8, 32, out, error));
+    REQUIRE_FALSE(error.empty());
+}
+
+TEST_CASE("WeightFile loads real talker tensors", "[tensor]") {
+    const std::string path = "models/qwen3-tts/qwen3-tts-12hz-0.6b-base-q8_0.gguf";
+    if (!std::filesystem::exists(path)) {
+        WARN("跳过：本地没有 " << path);
+        return;
+    }
+    iris::tts::WeightFile weights;
+    std::string error;
+    REQUIRE(weights.open(path, error));
+
+    // F32 RMSNorm 权重：[1024]
+    iris::tts::Tensor norm;
+    REQUIRE(weights.load("talker.blk.0.attn_norm.weight", norm, error));
+    REQUIRE(norm.dims.size() == 1);
+    REQUIRE(norm.cols() == 1024);
+    REQUIRE(norm.data.size() == 1024);
+    double mean = 0.0;
+    for (float v : norm.data) mean += v;
+    mean /= static_cast<double>(norm.data.size());
+    REQUIRE(mean > 0.5); // RMSNorm 权重初始化为 1 附近
+    REQUIRE(mean < 1.5);
+
+    // Q8_0 注意力投影：[1024(进), 2048(出)] → 16 heads × 128
+    iris::tts::Tensor q;
+    REQUIRE(weights.load("talker.blk.0.attn_q.weight", q, error));
+    REQUIRE(q.dims.size() == 2);
+    REQUIRE(q.cols() == 1024);
+    REQUIRE(q.rows() == 2048);
+    REQUIRE(q.data.size() == 2048u * 1024u);
+    double energy = 0.0;
+    for (float v : q.data) energy += static_cast<double>(v) * v;
+    REQUIRE(energy > 0.0); // 不是全零
+
+    // 不存在的张量要报错
+    iris::tts::Tensor missing;
+    REQUIRE_FALSE(weights.load("talker.blk.999.attn_q.weight", missing, error));
+    REQUIRE_FALSE(error.empty());
+}
+
+TEST_CASE("runtime kernels: matvec / rmsnorm / softmax / rope", "[kernels]") {
+    SECTION("matvec") {
+        // 2×3 行主序：[[1,2,3],[4,5,6]] · [1,1,1] = [6,15]
+        const float w[] = {1, 2, 3, 4, 5, 6};
+        const float x[] = {1, 1, 1};
+        float y[2] = {0, 0};
+        iris::tts::matvec(w, 2, 3, x, y);
+        REQUIRE(y[0] == 6.0f);
+        REQUIRE(y[1] == 15.0f);
+    }
+
+    SECTION("rmsnorm normalises to unit RMS") {
+        const float x[] = {3.0f, 4.0f, 0.0f, 0.0f}; // RMS = sqrt(25/4) = 2.5
+        const float weight[] = {1, 1, 1, 1};
+        float out[4] = {};
+        iris::tts::rmsnorm(out, x, weight, 4, 1e-6f);
+        REQUIRE(std::abs(out[0] - 1.2f) < 1e-5f);
+        REQUIRE(std::abs(out[1] - 1.6f) < 1e-5f);
+
+        // 权重缩放
+        const float weight2[] = {2, 2, 2, 2};
+        float out2[4] = {};
+        iris::tts::rmsnorm(out2, x, weight2, 4, 1e-6f);
+        REQUIRE(std::abs(out2[0] - 2.4f) < 1e-5f);
+    }
+
+    SECTION("softmax sums to one") {
+        float v[] = {1.0f, 2.0f, 3.0f};
+        iris::tts::softmax_inplace(v, 3);
+        float sum = 0.0f;
+        for (float p : v) sum += p;
+        REQUIRE(std::abs(sum - 1.0f) < 1e-6f);
+        REQUIRE(v[2] > v[1]);
+        REQUIRE(v[1] > v[0]);
+    }
+
+    SECTION("rope preserves each head's norm") {
+        std::vector<float> vec(2 * 8);
+        for (std::size_t i = 0; i < vec.size(); ++i) vec[i] = 0.1f * static_cast<float>(i + 1);
+        auto before = vec;
+
+        iris::tts::rope_interleaved(vec.data(), 2, 8, 13, 1e6f);
+
+        for (int h = 0; h < 2; ++h) {
+            double n0 = 0.0, n1 = 0.0;
+            for (int i = 0; i < 8; ++i) {
+                n0 += static_cast<double>(before[static_cast<std::size_t>(h * 8 + i)]) * before[static_cast<std::size_t>(h * 8 + i)];
+                n1 += static_cast<double>(vec[static_cast<std::size_t>(h * 8 + i)]) * vec[static_cast<std::size_t>(h * 8 + i)];
+            }
+            REQUIRE(std::abs(n0 - n1) < 1e-4);
+        }
+
+        // pos = 0 时恒等
+        auto identity = before;
+        iris::tts::rope_interleaved(identity.data(), 2, 8, 0, 1e6f);
+        for (std::size_t i = 0; i < identity.size(); ++i) {
+            REQUIRE(std::abs(identity[i] - before[i]) < 1e-6f);
+        }
+    }
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {
