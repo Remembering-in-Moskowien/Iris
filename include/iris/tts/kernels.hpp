@@ -29,4 +29,13 @@ void softmax_inplace(float* x, std::size_t n);
 /// vec 布局为 n_heads × head_dim，pos 为该 token 的位置编号。
 void rope_interleaved(float* vec, int n_heads, int head_dim, int pos, float theta);
 
+/// 多模态 RoPE（mRoPE）：把 head_dim/2 个旋转对按 sections 切成多段，
+/// 每段用各自的 position 分量（Qwen3-TTS 的 mrope_section = [24,20,20]）。
+/// sections 之和必须等于 head_dim/2；否则退化为单段。
+void rope_mrope(float* vec, int n_heads, int head_dim, const int pos[3], const int sections[3],
+                float theta);
+
+/// 单头 RMSNorm（在原地对每个 head 的 head_dim 维做归一）。
+void rmsnorm_heads(float* vec, int n_heads, int head_dim, const float* weight, float eps);
+
 } // namespace iris::tts

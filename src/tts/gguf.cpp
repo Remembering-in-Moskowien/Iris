@@ -128,8 +128,19 @@ bool read_value(Reader& r, ValueType type, MetaValue& v) {
             if (!r.u32(elem_type) || !r.u64(count)) return false;
             v.array_type = static_cast<ValueType>(elem_type);
             v.array_len = count;
+            const bool numeric = elem_type != static_cast<std::uint32_t>(ValueType::String) &&
+                                 elem_type != static_cast<std::uint32_t>(ValueType::Array);
+            const bool keep = numeric && count <= kMaxArrayKeep;
             for (std::uint64_t i = 0; i < count; ++i) {
-                if (!skip_value(r, v.array_type)) return false;
+                if (!keep) {
+                    if (!skip_value(r, v.array_type)) return false;
+                    continue;
+                }
+                MetaValue elem;
+                if (!read_value(r, v.array_type, elem)) return false;
+                v.ints.push_back(elem.type == ValueType::F32 || elem.type == ValueType::F64
+                                     ? static_cast<std::int64_t>(elem.as_float)
+                                     : elem.as_int);
             }
             return true;
         }

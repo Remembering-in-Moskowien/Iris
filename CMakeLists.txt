@@ -65,6 +65,7 @@ add_library(iris_core
     src/tts/gguf.cpp
     src/tts/tensor.cpp
     src/tts/kernels.cpp
+    src/tts/talker.cpp
     src/tts/qwen3_tts.cpp
     src/tts/indextts.cpp
     src/emotion/emotion.cpp)

@@ -28,12 +28,32 @@ struct Tensor {
     [[nodiscard]] bool empty() const { return data.empty(); }
 };
 
+/// 未反量化的张量：保留 GGUF 原始字节，按行惰性反量化。
+/// 大词表/大矩阵必须走这条路径（f32 展开会让 940 MB 权重变成 ~3 GB）。
+struct RawTensor {
+    std::string name;
+    std::vector<std::uint64_t> dims;
+    std::uint32_t type = 0;
+    std::vector<std::uint8_t> bytes;
+
+    [[nodiscard]] std::size_t nelements() const;
+    [[nodiscard]] std::size_t cols() const { return dims.empty() ? 0 : dims[0]; }
+    [[nodiscard]] std::size_t rows() const { return dims.size() < 2 ? 1 : dims[1]; }
+    [[nodiscard]] bool empty() const { return bytes.empty(); }
+};
+
 /// 反量化一段连续数据：n_elems 必须能被该类型的块大小整除。
 bool dequantize(const std::uint8_t* src, std::size_t src_bytes, std::uint32_t type,
                 std::size_t n_elems, std::vector<float>& out, std::string& error);
 
 /// IEEE 半精度 → float32。
 float f16_to_f32(std::uint16_t h);
+
+/// y[rows] = W · x[cols]，W 为原始量化权重（逐行惰性反量化，不展开成大数组）。
+bool matvec_raw(const RawTensor& w, const float* x, float* y, std::string& error);
+
+/// 取第 row 行的 f32 副本（词表嵌入查表用）。dst 至少 cols 个 float。
+bool row_to_float(const RawTensor& t, std::size_t row, float* dst, std::string& error);
 
 /// 单个权重文件：解析目录、按需读取并反量化张量（不把整份权重读进内存）。
 class WeightFile {
@@ -47,6 +67,9 @@ public:
     bool load(const std::string& name, Tensor& out, std::string& error);
     /// 同上，但找不到时返回 false 且不视为错误（方便可选张量）。
     bool try_load(const std::string& name, Tensor& out);
+
+    /// 读取原始量化字节（不反量化），供运行时按行惰性反量化。
+    bool load_raw(const std::string& name, RawTensor& out, std::string& error);
 
 private:
     std::string path_;

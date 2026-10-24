@@ -43,6 +43,12 @@ std::size_t Tensor::nelements() const {
     return n;
 }
 
+std::size_t RawTensor::nelements() const {
+    std::size_t n = 1;
+    for (auto d : dims) n *= static_cast<std::size_t>(d);
+    return n;
+}
+
 float f16_to_f32(std::uint16_t h) {
     const std::uint32_t sign = static_cast<std::uint32_t>(h & 0x8000u) << 16;
     const int exp = (h >> 10) & 0x1F;
@@ -167,6 +173,71 @@ bool dequantize(const std::uint8_t* src, std::size_t src_bytes, std::uint32_t ty
     }
 }
 
+bool matvec_raw(const RawTensor& w, const float* x, float* y, std::string& error) {
+    const std::size_t rows = w.rows();
+    const std::size_t cols = w.cols();
+    if (rows == 0 || cols == 0) {
+        error = "matvec: 空权重 " + w.name;
+        return false;
+    }
+    const std::uint32_t elems = gguf::block_elems(w.type);
+    const std::size_t bytes = gguf::block_bytes(w.type);
+    if (elems == 0 || bytes == 0) {
+        error = std::string("matvec: 不支持的类型 ") + gguf::type_name(w.type) + " @ " + w.name;
+        return false;
+    }
+    if (cols % elems != 0) {
+        error = "matvec: 行宽不是量化块整数倍 @ " + w.name;
+        return false;
+    }
+
+    const std::size_t row_bytes = cols / elems * bytes;
+    if (w.bytes.size() != row_bytes * rows) {
+        error = "matvec: 权重尺寸与形状不符 @ " + w.name;
+        return false;
+    }
+
+    std::vector<float> row(cols);
+    for (std::size_t r = 0; r < rows; ++r) {
+        if (!dequantize(w.bytes.data() + r * row_bytes, row_bytes, w.type, cols, row, error)) {
+            error = w.name + "：" + error;
+            return false;
+        }
+        float sum = 0.0f;
+        for (std::size_t c = 0; c < cols; ++c) sum += row[c] * x[c];
+        y[r] = sum;
+    }
+    return true;
+}
+
+bool row_to_float(const RawTensor& t, std::size_t row, float* dst, std::string& error) {
+    const std::size_t rows = t.rows();
+    const std::size_t cols = t.cols();
+    if (row >= rows || cols == 0) {
+        error = "embedding: 行号越界 @ " + t.name;
+        return false;
+    }
+    const std::uint32_t elems = gguf::block_elems(t.type);
+    const std::size_t bytes = gguf::block_bytes(t.type);
+    if (elems == 0 || bytes == 0 || cols % elems != 0) {
+        error = "embedding: 不支持的类型/行宽 @ " + t.name;
+        return false;
+    }
+    const std::size_t row_bytes = cols / elems * bytes;
+    if (t.bytes.size() != row_bytes * rows) {
+        error = "embedding: 尺寸与形状不符 @ " + t.name;
+        return false;
+    }
+
+    std::vector<float> tmp;
+    if (!dequantize(t.bytes.data() + row * row_bytes, row_bytes, t.type, cols, tmp, error)) {
+        error = t.name + "：" + error;
+        return false;
+    }
+    std::memcpy(dst, tmp.data(), cols * sizeof(float));
+    return true;
+}
+
 bool WeightFile::open(const std::string& path, std::string& error) {
     path_ = path;
     return gguf::load(path, index_, error);
@@ -209,6 +280,45 @@ bool WeightFile::load(const std::string& name, Tensor& out, std::string& error) 
     out.dims = info->dims;
     if (!dequantize(raw.data(), raw.size(), info->type, n_elems, out.data, error)) {
         error = name + "：" + error;
+        return false;
+    }
+    return true;
+}
+
+bool WeightFile::load_raw(const std::string& name, RawTensor& out, std::string& error) {
+    const gguf::TensorInfo* info = index_.tensor(name);
+    if (!info) {
+        error = "模型里没有张量：" + name;
+        return false;
+    }
+
+    std::size_t n_elems = 1;
+    for (auto d : info->dims) n_elems *= static_cast<std::size_t>(d);
+    const std::size_t blocks = n_elems / std::max<std::uint32_t>(1, gguf::block_elems(info->type));
+    const std::size_t bytes = blocks * gguf::block_bytes(info->type);
+    if (bytes == 0) {
+        error = std::string("张量类型不支持：") + name + " (" + gguf::type_name(info->type) + ")";
+        return false;
+    }
+
+    std::ifstream f(path_, std::ios::binary);
+    if (!f) {
+        error = "无法打开权重文件：" + path_;
+        return false;
+    }
+    f.seekg(static_cast<std::streamoff>(index_.data_offset + info->offset));
+    if (!f) {
+        error = "张量偏移越界：" + name;
+        return false;
+    }
+
+    out = RawTensor{};
+    out.name = name;
+    out.dims = info->dims;
+    out.type = info->type;
+    out.bytes.resize(bytes);
+    if (!f.read(reinterpret_cast<char*>(out.bytes.data()), static_cast<std::streamsize>(bytes))) {
+        error = "张量数据读取失败：" + name;
         return false;
     }
     return true;

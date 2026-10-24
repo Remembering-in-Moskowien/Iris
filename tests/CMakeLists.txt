@@ -10,4 +10,5 @@ target_link_libraries(iris_tests PRIVATE iris_core Catch2::Catch2WithMain)
 target_compile_options(iris_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 
 include(Catch)
-catch_discover_tests(iris_tests)
+# 依赖 models/ 的用例用仓库根目录相对路径，ctest 默认在 build/tests 下跑会静默跳过。
+catch_discover_tests(iris_tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

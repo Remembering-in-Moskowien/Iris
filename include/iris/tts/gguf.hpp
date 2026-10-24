@@ -21,7 +21,7 @@ enum class ValueType : std::uint32_t {
     Bool = 7, String = 8, Array = 9, U64 = 10, I64 = 11, F64 = 12,
 };
 
-/// 一条元数据（数组只记录长度与元素类型，不展开大数组）。
+/// 一条元数据（数组只保留少量整数元素，够读 mRoPE 分区/上采样率等配置）。
 struct MetaValue {
     ValueType type = ValueType::U32;
     std::int64_t as_int = 0;
@@ -29,7 +29,11 @@ struct MetaValue {
     std::string as_string;
     ValueType array_type = ValueType::U32;
     std::uint64_t array_len = 0;
+    std::vector<std::int64_t> ints; ///< 小整数数组的元素（array_len <= kMaxArrayKeep 时填充）
 };
+
+/// 元数据里最多保留的数组元素个数。
+inline constexpr std::uint64_t kMaxArrayKeep = 64;
 
 /// 张量表中一项。
 struct TensorInfo {

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -9,6 +10,7 @@
 #include "iris/model/ir_document.hpp"
 #include "iris/tts/gguf.hpp"
 #include "iris/tts/kernels.hpp"
+#include "iris/tts/talker.hpp"
 #include "iris/tts/tensor.hpp"
 #include "iris/tts/timestretch.hpp"
 #include "iris/tts/tts.hpp"
@@ -200,10 +202,16 @@ TEST_CASE("WeightFile loads real talker tensors", "[tensor]") {
     REQUIRE(norm.cols() == 1024);
     REQUIRE(norm.data.size() == 1024);
     double mean = 0.0;
-    for (float v : norm.data) mean += v;
+    double energy = 0.0;
+    for (float v : norm.data) {
+        mean += v;
+        energy += static_cast<double>(v) * v;
+    }
     mean /= static_cast<double>(norm.data.size());
-    REQUIRE(mean > 0.5); // RMSNorm 权重初始化为 1 附近
-    REQUIRE(mean < 1.5);
+    // 训练后的 RMSNorm 权重不是恒等，但应当是非零、量级合理的一维权重。
+    REQUIRE(std::abs(mean) > 1e-3);
+    REQUIRE(std::abs(mean) < 5.0);
+    REQUIRE(energy > 0.0);
 
     // Q8_0 注意力投影：[1024(进), 2048(出)] → 16 heads × 128
     iris::tts::Tensor q;
@@ -212,9 +220,9 @@ TEST_CASE("WeightFile loads real talker tensors", "[tensor]") {
     REQUIRE(q.cols() == 1024);
     REQUIRE(q.rows() == 2048);
     REQUIRE(q.data.size() == 2048u * 1024u);
-    double energy = 0.0;
-    for (float v : q.data) energy += static_cast<double>(v) * v;
-    REQUIRE(energy > 0.0); // 不是全零
+    double q_energy = 0.0;
+    for (float v : q.data) q_energy += static_cast<double>(v) * v;
+    REQUIRE(q_energy > 0.0); // 不是全零
 
     // 不存在的张量要报错
     iris::tts::Tensor missing;
@@ -281,6 +289,82 @@ TEST_CASE("runtime kernels: matvec / rmsnorm / softmax / rope", "[kernels]") {
             REQUIRE(std::abs(identity[i] - before[i]) < 1e-6f);
         }
     }
+}
+
+TEST_CASE("talker: incremental decode matches full prefill", "[talker]") {
+    const std::string path = "models/qwen3-tts/qwen3-tts-12hz-0.6b-base-q8_0.gguf";
+    if (!std::filesystem::exists(path)) {
+        WARN("跳过：本地没有 " << path);
+        return;
+    }
+
+    // 只加载 2 层、跳过 151936×2048 的文本词表，保证测试内存/时间可控。
+    iris::tts::Talker talker;
+    std::string error;
+    REQUIRE(talker.load(path, error, /*max_layers=*/2, /*with_text_embedding=*/false));
+    REQUIRE(talker.n_loaded_layers() == 2);
+    REQUIRE(talker.config().d_model == 1024);
+    REQUIRE(talker.config().n_heads == 16);
+    REQUIRE(talker.config().n_kv_heads == 8);
+    REQUIRE(talker.config().mrope == std::array<int, 3>{24, 20, 20});
+
+    // 5 个音频 token，位置连续（三路位置相同 → 退化为普通 RoPE）
+    std::vector<iris::tts::Talker::Item> items;
+    for (int i = 0; i < 5; ++i) {
+        iris::tts::Talker::Item it;
+        it.is_text = false;
+        it.id = 100 + i;
+        it.pos = {i, i, i};
+        items.push_back(it);
+    }
+
+    std::vector<float> prefill_logits;
+    REQUIRE(talker.forward(items, prefill_logits, error));
+    REQUIRE(prefill_logits.size() == static_cast<std::size_t>(talker.config().vocab));
+    for (float v : prefill_logits) REQUIRE(std::isfinite(v));
+
+    // 逐 token 增量解码：最后一步的 logits 必须和一次性预填充一致（KV cache 自洽）
+    talker.reset();
+    REQUIRE(talker.seq_len() == 0);
+    std::vector<float> step_logits;
+    for (const auto& it : items) {
+        REQUIRE(talker.forward({it}, step_logits, error));
+    }
+    REQUIRE(talker.seq_len() == items.size());
+
+    double max_diff = 0.0;
+    for (std::size_t i = 0; i < prefill_logits.size(); ++i) {
+        max_diff = std::max(max_diff,
+                            std::abs(static_cast<double>(prefill_logits[i]) - step_logits[i]));
+    }
+    REQUIRE(max_diff < 1e-3);
+
+    // 越界 token 要报错
+    iris::tts::Talker::Item bad;
+    bad.is_text = false;
+    bad.id = talker.config().vocab + 5;
+    REQUIRE_FALSE(talker.forward({bad}, step_logits, error));
+    REQUIRE_FALSE(error.empty());
+}
+
+TEST_CASE("talker: mRoPE sections split the rotation pairs", "[talker]") {
+    // 三路位置不同时，同一向量的旋转结果必须与单路位置不同
+    std::vector<float> a(8, 0.5f);
+    std::vector<float> b = a;
+    const int pos[3] = {0, 5, 11};
+    const int sections[3] = {2, 1, 1}; // head_dim 8 → 4 对
+
+    iris::tts::rope_mrope(a.data(), 1, 8, pos, sections, 1e4f);
+    const int pos_same[3] = {0, 0, 0};
+    iris::tts::rope_mrope(b.data(), 1, 8, pos_same, sections, 1e4f);
+
+    // 第 0、1 对（i=0,1）落在第一段，用 pos[0]=0 → 与全 0 相同；
+    // 第 2 对（i=2）落在第二段（pos 5）→ 一定不同。
+    REQUIRE(std::abs(a[0] - b[0]) < 1e-6f);
+    REQUIRE(std::abs(a[1] - b[1]) < 1e-6f);
+    REQUIRE(std::abs(a[2] - b[2]) < 1e-6f);
+    REQUIRE(std::abs(a[3] - b[3]) < 1e-6f);
+    REQUIRE(std::abs(a[4] - b[4]) > 1e-6f);
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {
