@@ -106,6 +106,8 @@ int run(int argc, char** argv) {
                     "Transcript of --ref (required when cloning from a WAV)");
     tts->add_option("--lang", tts_opts.language, "Language hint (zh, en, ...)");
     tts->add_option("--steps", tts_opts.steps, "Sampling steps (0 = backend default)");
+    tts->add_option("--threads", tts_opts.n_threads, "Inference threads (0 = auto, capped at 8)")
+        ->capture_default_str();
     tts->add_option("--cfg", tts_opts.cfg_scale, "CFG scale (0 = backend default)");
     tts->add_option("--out,-o", tts_opts.out_wav, "Output WAV path")->capture_default_str();
 
@@ -139,6 +141,8 @@ int run(int argc, char** argv) {
     dub->add_option("--out,-o", dub_opts.out_wav, "Output dub WAV path")->capture_default_str();
     dub->add_option("--ir-out", dub_opts.ir_out, "Also save the IR to this path");
     dub->add_option("--steps", dub_opts.steps, "TTS sampling steps (0 = backend default)");
+    dub->add_option("--threads", dub_opts.n_threads, "Inference threads (0 = auto, capped at 8)")
+        ->capture_default_str();
     dub->add_option("--cfg", dub_opts.cfg_scale, "TTS CFG scale (0 = backend default)");
     dub->add_option("--gap-ms", dub_opts.gap_ms,
                     "Minimum pause kept between cues (ms)")

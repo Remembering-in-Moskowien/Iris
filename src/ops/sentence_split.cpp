@@ -25,15 +25,29 @@ bool ends_with_boundary(const std::string& cur) {
     return false;
 }
 
-// 在 text 的标点边界处切分；超长句按 max_length 硬切。
+// 在 text 的标点边界处切分；超长句按 max_length（字符数）硬切。
+// 必须按 UTF-8 字符推进：按字节切会把汉字劈成两半，产出非法 UTF-8。
 std::vector<std::string> split_text(const std::string& text, std::size_t max_length) {
     std::vector<std::string> parts;
     std::string cur;
-    for (const char c : text) {
-        cur.push_back(c);
-        if (ends_with_boundary(cur) || cur.size() >= max_length) {
+    std::size_t chars = 0;
+    for (std::size_t i = 0; i < text.size();) {
+        const auto c = static_cast<unsigned char>(text[i]);
+        std::size_t len = 1;
+        if ((c & 0xE0) == 0xC0) {
+            len = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            len = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            len = 4;
+        }
+        if (i + len > text.size()) len = 1; // 末尾残缺序列：按单字节复制
+        cur.append(text, i, len);
+        i += len;
+        if (++chars >= max_length || ends_with_boundary(cur)) {
             parts.push_back(cur);
             cur.clear();
+            chars = 0;
         }
     }
     if (!cur.empty()) parts.push_back(cur);

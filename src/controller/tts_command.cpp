@@ -121,6 +121,7 @@ int run_tts(const TtsOptions& opts) {
     request.ref_text = opts.ref_text;
     request.language = opts.language;
     request.steps = opts.steps;
+    request.n_threads = opts.n_threads;
     request.cfg_scale = opts.cfg_scale;
 
     tts::TtsResult result;

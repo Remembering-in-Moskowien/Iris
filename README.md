@@ -41,10 +41,14 @@ ASR 推理全部在进程内完成，**不依赖外部 ASR 可执行文件**（�
 | `whisper`（默认） | ggml GGUF（如 ggml-base.bin） | [CrispStrobe/CrispASR](https://github.com/CrispStrobe/CrispASR)（ggml） |
 | `qwen3-asr` | ggml GGUF（qwen3-asr 模型） | [CrispStrobe/CrispASR](https://github.com/CrispStrobe/CrispASR)（ggml） |
 | `whisper-ct2` | CTranslate2 模型目录（`ct2-transformers-converter` 转换） | [OpenNMT/CTranslate2](https://github.com/OpenNMT/CTranslate2)（transformer） |
+| `sensevoice-onnx` | 目录：`model.int8.onnx` + `tokens.txt` | **Iris 自写 ONNX 编排**（kaldi fbank + LFR + CMVN + CTC） |
+| `paraformer-onnx` | 目录：`model.int8.onnx` + `tokens.txt` | 同上（中文，非自回归 CTC） |
 
 ```bash
 build/bin/iris asr demo.mp4 --engine qwen3-asr --language zh --model /path/to/qwen3-asr.gguf
 build/bin/iris asr demo.mp4 --engine whisper-ct2 --language en --model /path/to/whisper-ct2-model/
+build/bin/iris asr demo.mp4 --engine sensevoice-onnx --language en --model models/sensevoice
+build/bin/iris asr demo.wav --engine paraformer-onnx --language zh --model models/paraformer
 ```
 
 - ggml 模型（whisper / qwen3-asr）需自行准备：whisper GGUF 可从 whisper.cpp / Hugging Face

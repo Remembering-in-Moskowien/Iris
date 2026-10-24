@@ -13,10 +13,12 @@ namespace iris::asr {
 ///   - whisper（transformer）→ CTranslate2 DLL（tools/runtimes/ct2）
 ///   - whisper（onnx）       → onnxruntime DLL（tools/runtimes/onnx，GPU 可行）
 enum class AsrBackend {
-    WhisperGgml,   ///< whisper（ggml，CrispASR whisper 后端）
-    Qwen3AsrGgml,  ///< qwen3-asr（ggml，CrispASR qwen3 后端）
-    WhisperCt2,    ///< whisper（transformer，CTranslate2）
-    WhisperOnnx,   ///< whisper（onnx，onnxruntime）
+    WhisperGgml,      ///< whisper（ggml，CrispASR whisper 后端）
+    Qwen3AsrGgml,     ///< qwen3-asr（ggml，CrispASR qwen3 后端）
+    WhisperCt2,       ///< whisper（transformer，CTranslate2）
+    WhisperOnnx,      ///< whisper（onnx，onnxruntime）
+    SenseVoiceOnnx,   ///< SenseVoice（FunASR，onnxruntime，CTC）
+    ParaformerOnnx,   ///< Paraformer（FunASR，onnxruntime，CTC）
 };
 
 /// 将 CLI --engine 字符串解析为后端；未知引擎返回 false。

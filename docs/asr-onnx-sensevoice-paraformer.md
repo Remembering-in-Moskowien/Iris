@@ -1,4 +1,4 @@
-# SenseVoice / Paraformer ONNX 转录后端：规格与实现计划
+# SenseVoice / Paraformer ONNX 转录后端（已实现）
 
 两个模型都是 **非自回归 CTC**，共用同一套前处理，非常适合做 iris 的第二个「自写 ONNX ASR」
 （现有 `whisper-onnx` 走 encoder/decoder，这两个只要一次前向 + 贪心解码）。
@@ -64,10 +64,11 @@ out token_num      [B]           int32
   如需分句，交给现有 `SentenceSplit`。
 - 复用 `infra::resolve_threads()` 设 `SetIntraOpNumThreads`（ONNX 默认会吃满所有核）。
 
-## 验收
+## 实测（已验收）
 
-- `iris asr models/jfk.wav --engine sensevoice-onnx -m models/sensevoice -l en`
-  → 文本接近「And so my fellow Americans, ask not what your country can do for you…」。
-- 中文：用 `--engine paraformer-onnx -m models/paraformer -l zh` 跑一段中文音频。
+- SenseVoice / jfk.wav（英文）：`And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.` —— 全对，**2.5 s**（含模型加载）。
+- Paraformer / 中文配音片段（10.2 s）：`所以我的美国同胞们不要问你们的国家能为你做什么问什么您可以为您的国家做点什么` —— **8.4 s**。
+- `ctest`：`funasr: fbank / LFR / CTC helpers` 用例锁住帧数公式
+  （1 s → 100 帧 × 80 维 → LFR 17 帧 × 560 维）与 CTC 拼接规则。
 - 单测：fbank 帧数（`T = 1 + samples/160`）、LFR 帧数、CMVN 零均值近似、
   CTC 去重/去 blank、`<|...|>` 过滤。

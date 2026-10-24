@@ -8,6 +8,7 @@
 
 #include "iris/asr/ct2_mel.hpp"
 #include "iris/asr/onnx.hpp"
+#include "iris/asr/onnx_funasr.hpp"
 #include "iris/infra/log.hpp"
 #include "iris/infra/threads.hpp"
 #include <ctranslate2/replica_pool.h>
@@ -33,6 +34,8 @@ const char* backend_key(AsrBackend b) {
         case AsrBackend::Qwen3AsrGgml: return "qwen3-asr";
         case AsrBackend::WhisperCt2: return "whisper-ct2";
         case AsrBackend::WhisperOnnx: return "whisper-onnx";
+        case AsrBackend::SenseVoiceOnnx: return "sensevoice-onnx";
+        case AsrBackend::ParaformerOnnx: return "paraformer-onnx";
     }
     return "unknown";
 }
@@ -306,6 +309,14 @@ bool parse_asr_backend(const std::string& engine, AsrBackend& out) {
         out = AsrBackend::WhisperOnnx;
         return true;
     }
+    if (engine == "sensevoice-onnx" || engine == "sensevoice") {
+        out = AsrBackend::SenseVoiceOnnx;
+        return true;
+    }
+    if (engine == "paraformer-onnx" || engine == "paraformer") {
+        out = AsrBackend::ParaformerOnnx;
+        return true;
+    }
     return false;
 }
 
@@ -317,6 +328,8 @@ bool asr_backend_available(AsrBackend backend) {
         case AsrBackend::WhisperCt2:
             return IRIS_HAS_CT2 != 0;
         case AsrBackend::WhisperOnnx:
+        case AsrBackend::SenseVoiceOnnx:
+        case AsrBackend::ParaformerOnnx:
             return IRIS_HAS_ONNX != 0;
     }
     return false;
@@ -336,6 +349,20 @@ bool AsrEngine::transcribe(const std::string& audio_path, const std::string& lan
             return transcribe_ct2(model_path_, audio_path, language, out, error, n_threads_);
         case AsrBackend::WhisperOnnx:
             return transcribe_onnx(model_path_, audio_path, language, out, error);
+        case AsrBackend::SenseVoiceOnnx: {
+            FunasrOptions opt;
+            opt.model_dir = model_path_;
+            opt.language = language;
+            opt.n_threads = n_threads_;
+            return transcribe_funasr(FunasrModel::SenseVoice, opt, audio_path, out, error);
+        }
+        case AsrBackend::ParaformerOnnx: {
+            FunasrOptions opt;
+            opt.model_dir = model_path_;
+            opt.language = language;
+            opt.n_threads = n_threads_;
+            return transcribe_funasr(FunasrModel::Paraformer, opt, audio_path, out, error);
+        }
     }
     error = "未知 ASR 后端";
     return false;

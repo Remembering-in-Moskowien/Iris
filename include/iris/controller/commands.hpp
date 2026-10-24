@@ -51,6 +51,7 @@ struct TtsOptions {
     std::string language;
     std::string out_wav = "tts.wav";
     int steps = 0;
+    int n_threads = 0; ///< 0 = 自动（min(8, 核数)）
     float cfg_scale = 0.0f;
 };
 
@@ -75,6 +76,7 @@ struct DubOptions {
     std::string out_wav = "dub.wav";
     std::string ir_out; ///< 非空则把本次 IR 另存一份
     int steps = 0;
+    int n_threads = 0; ///< 0 = 自动（min(8, 核数)）
     float cfg_scale = 0.0f;
     bool fit_timing = true; ///< 按原句时隙对齐时长（--no-fit 关闭）
     int gap_ms = 200;       ///< 句间最小停顿

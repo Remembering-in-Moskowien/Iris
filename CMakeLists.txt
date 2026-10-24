@@ -58,6 +58,7 @@ add_library(iris_core
     src/asr/asr.cpp
     src/asr/ct2_mel.cpp
     src/asr/onnx.cpp
+    src/asr/onnx_funasr.cpp
     src/asr/diarize.cpp
     src/asr/separate.cpp
     src/view/subtitle_renderer.cpp

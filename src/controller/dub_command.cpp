@@ -113,6 +113,7 @@ int run_dub(const DubOptions& opts) {
     dub.request.ref_text = opts.ref_text;
     dub.request.language = opts.language;
     dub.request.steps = opts.steps;
+    dub.request.n_threads = opts.n_threads;
     dub.request.cfg_scale = opts.cfg_scale;
     dub.output_path = opts.out_wav;
     dub.after_asr = !from_ir;

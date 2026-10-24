@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "iris/asr/diarize.hpp"
+#include "iris/asr/onnx_funasr.hpp"
+#include "iris/ops/sentence_split.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/mt/translator.hpp"
 #include "iris/tts/gguf.hpp"
@@ -402,6 +404,62 @@ TEST_CASE("diarization: midpoint speaker assignment", "[diarize]") {
     REQUIRE(iris::asr::speaker_label(0) == "SPEAKER_0");
     REQUIRE(iris::asr::speaker_label(3) == "SPEAKER_3");
     REQUIRE(iris::asr::speaker_label(-1) == "SPEAKER_?");
+}
+
+TEST_CASE("funasr: fbank / LFR / CTC helpers", "[funasr]") {
+    // 1 s 空白音频：snip_edges=false → (16000 + 80) / 160 = 100 帧 × 80 维
+    std::vector<float> pcm(16000, 0.0f);
+    const auto fbank = iris::asr::detail::kaldi_fbank80(pcm);
+    REQUIRE(fbank.size() == 100u * 80u);
+
+    // LFR(7,6)：(100 + 6 - 1) / 6 = 17 帧 × 560 维
+    const auto features = iris::asr::detail::lfr(fbank, 7, 6);
+    REQUIRE(features.size() == 17u * 560u);
+
+    // CMVN 参数为空时原样返回
+    auto copy = features;
+    iris::asr::detail::apply_cmvn(copy, {}, {});
+    REQUIRE(copy == features);
+
+    // CTC 文本拼接：SenseVoice 走标签过滤 + ▁ 转空格；Paraformer 走 @@ 续接
+    const std::vector<std::string> sv = {"<blank>", "你", "好", "▁world", "<|zh|>", "<|NEUTRAL|>"};
+    REQUIRE(iris::asr::detail::ctc_greedy_text({1, 2}, sv, true) == "你好");
+    REQUIRE(iris::asr::detail::ctc_greedy_text({3}, sv, true) == "world");
+    REQUIRE(iris::asr::detail::ctc_greedy_text({1, 4, 5}, sv, true) == "你");
+    REQUIRE(iris::asr::detail::ctc_greedy_text({}, sv, true).empty());
+
+    const std::vector<std::string> pf = {"<blank>", "a@@", "b", "你", "</s>"};
+    REQUIRE(iris::asr::detail::ctc_greedy_text({1, 2}, pf, false) == "ab");
+    REQUIRE(iris::asr::detail::ctc_greedy_text({3, 4}, pf, false) == "你");
+}
+
+TEST_CASE("sentence split keeps UTF-8 characters intact", "[split]") {
+    iris::model::IrDocument doc;
+    doc.config.max_sentence_length = 5;
+
+    iris::model::Sentence s;
+    s.start_ms = 0;
+    s.end_ms = 1000;
+    s.text = "一二三四五六七八";
+    iris::model::Track t;
+    t.type = "transcribe";
+    t.sentences.push_back(s);
+    doc.state.tracks.push_back(t);
+
+    iris::core::PipelineContext ctx;
+    ctx.doc = &doc;
+    iris::ops::SentenceSplit op;
+    REQUIRE(op.execute(ctx));
+
+    const auto& out = doc.state.tracks[0].sentences;
+    REQUIRE(out.size() == 2);
+    REQUIRE(out[0].text == "一二三四五");
+    REQUIRE(out[1].text == "六七八");
+    // 每段都是合法 UTF-8（汉字 3 字节，长度应为 3 的倍数，且没有替换字符）
+    for (const auto& sentence : out) {
+        REQUIRE(sentence.text.size() % 3 == 0);
+        REQUIRE(sentence.text.find("\xEF\xBF\xBD") == std::string::npos);
+    }
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {

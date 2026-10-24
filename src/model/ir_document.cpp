@@ -224,7 +224,10 @@ IrDocument IrDocument::from_json(const nlohmann::json& j) {
     return d;
 }
 
-std::string IrDocument::dump(int indent) const { return to_json().dump(indent); }
+std::string IrDocument::dump(int indent) const {
+    // 文本里万一混入非法 UTF-8（模型词表拆开的多字节字符等），用 replace 而不是抛异常。
+    return to_json().dump(indent, ' ', false, nlohmann::json::error_handler_t::replace);
+}
 
 IrDocument IrDocument::load(const std::string& path) {
     std::ifstream in(path, std::ios::binary);
