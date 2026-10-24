@@ -8,7 +8,7 @@ commit `7a3acd1`，2026-10-07）。方法：枚举对方的 CLI 命令注册、`
 
 C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命令 + 7 个算子**。
 主链（转码 → 预处理 → 转写 → 分句 → 渲染）已对等，翻译（非 LLM）与配音在 iris 侧
-已能端到端跑通；但**说话人分割、人声分离、校正、OCR、字幕导入、质量报告、REST/更新**
+已能端到端跑通；**说话人分割、人声分离、校正、OCR、字幕导入**已补齐，仍缺**质量报告、REST/更新**
 这些整条链路仍然缺失，其中**说话人分割（Diarization）确实不在 iris 链路上**——
 但运行时与模型都已就绪，可以立刻接。
 
@@ -38,7 +38,7 @@ C# 侧有 **16 条顶层命令 + 27 个管线算子**；iris 目前 **11 条命�
 | 时间对齐 | `AlignmentOperator`、`TimeAlignmentOperator`、`AlignmentTempo`、`CrispAsrAlignmentStrategy` | WSOLA 压时隙 + 顺延（近似） | 🟡 |
 | 混音/封装 | `AudioMixOperator`（dub → `*.dub.wav`，不封装回视频） | 内联混音 → WAV | ✅ |
 | 校正 | `SpellCheckOperator`、`SubtitleTextCorrectorOperator`、`OverlapResolutionOperator`、`SubtitleTrackCheckerOperator`、`CorrectionReportOperator`、`TextPreprocessingOperator` | ✅ `correct` 命令 + [text/cleanup.cpp](src/text/cleanup.cpp)：空白/重复标点/空句/反序时间码/重叠消解（缺拼写检查与 LLM 校正） | 🟡 |
-| OCR | `OcrExtractOperator`、`Ocr/OcrClientProvider` | 无 | ❌ |
+| OCR | `OcrExtractOperator`、`Ocr/OcrClientProvider` | ✅ `ocr` 命令：vsf 自动 ROI + 段内采样 + PP-OCRv5（DBNet 检测 + CRNN-CTC 识别，自写编排） | ✅ |
 | 剧本导入 | `ScriptLoaderOperator`、`ScriptTimelineMapperOperator`、`BilingualSubtitleParserOperator` | 无 | ❌ |
 | 字幕导入 | `ConvertParseOperator`、`CombineParse/Merge/Dedupe` | ✅ `convert` / `combine`（SRT/ASS/SSA/VTT 解析、去重、双语按时间重叠对齐） | ✅ |
 | 质量报告 | `QualityReportOperator` + 整套 `Quality*` 模型 | 无 | ❌ |
@@ -92,7 +92,7 @@ C# `Centurion.Models` 里 iris 目前缺的字段：
 | P0 | 推理线程数修复 | 默认 `hardware_concurrency` 在混合架构 CPU 上比 8 线程慢 70–100 倍 | ✅ 已修（whisper-tiny 82.7 s → 1.08 s） |
 | P1 | 校正链（拼写、重叠消解、轨道自检） | 长视频字幕质量的刚需；纯文本逻辑，无模型依赖 | 🟡 文本/时间码校正已做，拼写检查待补 |
 | P1 | 字幕导入（convert/combine）+ 剧本导入（from-script） | 「已有字幕→IR」入口 | 🟡 convert/combine 已做，from-script 待做 |
-| P1 | OCR（VideoSubFinder 取帧 + OCR provider） | 硬字幕视频的入口；`vsf` 已实现取帧部分 | ⏳ 待做 |
+| P1 | OCR（VideoSubFinder 取帧 + OCR provider） | 硬字幕视频的入口 | ✅ `ocr` 命令（PP-OCRv5 ONNX） |
 | P1 | 标点恢复 | 中文 ASR（Paraformer/SenseVoice）默认不带标点 | ✅ `asr --punc`（FireRedPunc） |
 | P1 | dub 接入说话人（多音色） | 分割标签已有，差「按 speaker 选音色」 | ✅ `dub --voice SPEAKER=ref.wav` / `--voices voices.json` |
 | P2 | 质量报告（Quality* + HTML） | 依赖校正/对齐数据先齐 | ⏳ 待做 |

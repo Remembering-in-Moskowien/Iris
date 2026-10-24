@@ -9,6 +9,7 @@
 
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
+#include "iris/ocr/rapid_ocr.hpp"
 #include "iris/ops/dub_tts.hpp"
 #include "iris/ops/sentence_split.hpp"
 #include "iris/subtitle/combine.hpp"
@@ -594,6 +595,55 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("ocr: detection boxes and CTC decoding", "[ocr]") {
+    // 概率图里放一个矩形文本块 → 一个框
+    const int w = 20;
+    const int h = 10;
+    std::vector<float> prob(static_cast<std::size_t>(w) * h, 0.0f);
+    for (int y = 2; y <= 6; ++y) {
+        for (int x = 5; x <= 10; ++x) prob[static_cast<std::size_t>(y) * w + x] = 0.9f;
+    }
+    const auto boxes = iris::ocr::detail::boxes_from_mask(prob, w, h, 0.3f, 0.5f);
+    REQUIRE(boxes.size() == 1);
+    REQUIRE(boxes[0].x == 5);
+    REQUIRE(boxes[0].y == 2);
+    REQUIRE(boxes[0].w == 6);
+    REQUIRE(boxes[0].h == 5);
+    REQUIRE(boxes[0].score > 0.8f);
+
+    // 低置信度块被过滤
+    std::fill(prob.begin(), prob.end(), 0.35f);
+    REQUIRE(iris::ocr::detail::boxes_from_mask(prob, w, h, 0.3f, 0.5f).empty());
+
+    // unclip 外扩：d = area*ratio/perimeter = 30*1.5/22 ≈ 2.05 → pad 2
+    std::vector<iris::ocr::detail::Box> one;
+    iris::ocr::detail::Box b;
+    b.x = 5;
+    b.y = 2;
+    b.w = 6;
+    b.h = 5;
+    one.push_back(b);
+    const auto grown = iris::ocr::detail::expand_boxes(one, 1.5f, 100, 100);
+    REQUIRE(grown.size() == 1);
+    REQUIRE(grown[0].x == 3);
+    REQUIRE(grown[0].y == 0);
+    REQUIRE(grown[0].w == 10);
+    REQUIRE(grown[0].h == 9);
+
+    // CTC：去 blank、去连续重复（0=blank，1/2 为字典项）
+    const std::vector<std::string> dict = {"A", "B"};
+    const int steps = 6;
+    const int classes = 3;
+    std::vector<float> logits(static_cast<std::size_t>(steps) * classes, 0.0f);
+    const int ids[steps] = {1, 1, 0, 2, 0, 1};
+    for (int t = 0; t < steps; ++t) {
+        logits[static_cast<std::size_t>(t) * classes + ids[t]] = 1.0f;
+    }
+    float score = 0.0f;
+    REQUIRE(iris::ocr::detail::ctc_decode(logits, steps, classes, dict, &score) == "ABA");
+    REQUIRE(score > 0.0f);
 }
 
 TEST_CASE("dub: per-speaker voice selection", "[dub]") {

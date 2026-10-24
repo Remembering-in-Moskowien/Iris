@@ -139,7 +139,7 @@ double fraction_nonzero(const std::vector<unsigned char>& b) {
 
 std::vector<VsfSegment> run_vsf(const std::string& video_path,
                                  int roi_x, int roi_y, int roi_w, int roi_h,
-                                 double sample_fps) {
+                                 double sample_fps, double score_threshold) {
     std::vector<VsfSegment> out;
 
     // 1. ffprobe 取分辨率
@@ -224,7 +224,7 @@ std::vector<VsfSegment> run_vsf(const std::string& video_path,
             0.20 * std::min(sYellow * 8.0, 1.0) +
             0.25 * std::min(sEdge * 4.0, 1.0) +
             0.25 * std::min(sBlob * 6.0, 1.0);
-        const bool has = score > 0.35;
+        const bool has = score > score_threshold;
 
         window.push_back({has, t});
         while (!window.empty() && t - window.front().t > window_sec) window.pop_front();
@@ -256,6 +256,89 @@ std::vector<VsfSegment> run_vsf(const std::string& video_path,
 
     spdlog::info("vsf: 检测到 {} 个字幕段", out.size());
     return out;
+}
+
+VsfRoi detect_text_roi(const std::string& video_path) {
+    VsfRoi roi;
+    auto pr = infra::run_process({"ffprobe", "-v", "error", "-select_streams", "v:0",
+                                  "-show_entries", "stream=width,height",
+                                  "-of", "csv=p=0", video_path});
+    if (!pr.ok() || !pr.value().success()) return roi;
+    int W = 0, H = 0;
+    std::sscanf(pr.value().stdout_text.c_str(), "%d,%d", &W, &H);
+    if (W <= 0 || H <= 0) return roi;
+
+    auto dr = infra::run_process({"ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                  "-of", "csv=p=0", video_path});
+    double duration = 0.0;
+    if (dr.ok() && dr.value().success()) {
+        duration = std::atof(dr.value().stdout_text.c_str());
+    }
+    if (duration <= 0.0) return roi;
+
+    // 只在下半部分找（字幕绝大多数在画面下部），按行累计亮像素
+    const int y_start = static_cast<int>(H * 0.5);
+    const int band_h = H - y_start;
+    std::vector<double> row_density(static_cast<std::size_t>(band_h), 0.0);
+    int left = W, right = -1;
+    int samples = 0;
+
+    const int kSamples = 10;
+    for (int i = 0; i < kSamples; ++i) {
+        const double t = duration * (i + 0.5) / kSamples;
+        char tbuf[32];
+        std::snprintf(tbuf, sizeof tbuf, "%.3f", t);
+        char crop[96];
+        std::snprintf(crop, sizeof crop, "crop=%d:%d:0:%d", W, band_h, y_start);
+        infra::StreamProcess proc;
+        if (!proc.start({"ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", tbuf, "-i",
+                         video_path, "-frames:v", "1", "-vf", crop, "-f", "rawvideo",
+                         "-pix_fmt", "rgb24", "-"})) {
+            continue;
+        }
+        std::vector<unsigned char> frame(static_cast<std::size_t>(W) * band_h * 3, 0);
+        const std::size_t got = proc.read_exact(frame.data(), frame.size());
+        proc.close();
+        if (got < frame.size()) continue;
+        ++samples;
+
+        for (int y = 0; y < band_h; ++y) {
+            const unsigned char* row = frame.data() + static_cast<std::size_t>(y) * W * 3;
+            for (int x = 0; x < W; ++x) {
+                const int g = (0.299 * row[x * 3] + 0.587 * row[x * 3 + 1] + 0.114 * row[x * 3 + 2]);
+                if (g >= 200) {
+                    row_density[static_cast<std::size_t>(y)] += 1.0;
+                    left = std::min(left, x);
+                    right = std::max(right, x);
+                }
+            }
+        }
+    }
+    if (samples == 0 || right < 0) return roi;
+
+    // 找最密集的一行，按峰值 20% 扩展成连续带
+    const auto peak_it = std::max_element(row_density.begin(), row_density.end());
+    const double peak = *peak_it;
+    if (peak <= 0.0) return roi;
+    int peak_row = static_cast<int>(peak_it - row_density.begin());
+    int top = peak_row;
+    int bottom = peak_row;
+    while (top > 0 && row_density[static_cast<std::size_t>(top - 1)] > peak * 0.2) --top;
+    while (bottom + 1 < band_h && row_density[static_cast<std::size_t>(bottom + 1)] > peak * 0.2) {
+        ++bottom;
+    }
+
+    const int pad = 8;
+    roi.y = std::max(0, y_start + top - pad);
+    roi.h = std::min(H - roi.y, bottom - top + 1 + 2 * pad);
+    roi.x = std::max(0, left - 20);
+    roi.w = std::min(W - roi.x, right - left + 1 + 40);
+    roi.ok = roi.w > 16 && roi.h > 8;
+    if (roi.ok) {
+        spdlog::info("vsf: 自动 ROI = {},{} {}x{}（峰值行 {}）", roi.x, roi.y, roi.w, roi.h,
+                     y_start + peak_row);
+    }
+    return roi;
 }
 
 } // namespace iris::ops

@@ -210,6 +210,17 @@ int run(int argc, char** argv) {
                           "Max generated tokens per sentence")
         ->capture_default_str();
 
+    // ---- ocr ----
+    auto* ocr = app.add_subcommand("ocr", "Extract hard-coded subtitles from a video into an IR");
+    controller::OcrCommandOptions ocr_opts;
+    ocr->add_option("video", ocr_opts.input, "Video file")->required();
+    ocr->add_option("--out,-o", ocr_opts.out_ir, "Output IR path");
+    ocr->add_option("--language,-l", ocr_opts.language, "Language code")->capture_default_str();
+    ocr->add_option("--roi", ocr_opts.roi, "Subtitle ROI: x,y,w,h (default: bottom 40%)");
+    ocr->add_option("--model-dir", ocr_opts.model_dir, "PP-OCR model dir")->capture_default_str();
+    ocr->add_option("--fps", ocr_opts.sample_fps, "Frame sampling rate for detection")
+        ->capture_default_str();
+
     // ---- convert / combine ----
     auto* convert = app.add_subcommand("convert", "Import one subtitle file (SRT/ASS/VTT) into an IR");
     std::vector<std::string> convert_inputs, combine_inputs;
@@ -315,6 +326,7 @@ int run(int argc, char** argv) {
     }
     if (translate->parsed()) return controller::run_translate(translate_opts);
     if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (ocr->parsed()) return controller::run_ocr(ocr_opts);
     if (convert->parsed()) return controller::run_convert(convert_inputs, convert_lang, convert_out);
     if (combine->parsed())
         return controller::run_combine(combine_inputs, combine_lang, combine_out, combine_bilingual);

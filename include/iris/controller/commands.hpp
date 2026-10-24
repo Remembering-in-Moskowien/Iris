@@ -109,6 +109,19 @@ struct TranslateCommandOptions {
 /// translate：机器翻译（非 LLM：OPUS-MT/Marian、M2M100）。
 int run_translate(const TranslateCommandOptions& opts);
 
+/// OCR 命令选项。
+struct OcrCommandOptions {
+    std::string input;
+    std::string out_ir;
+    std::string language = "zh";
+    std::string roi;                    ///< x,y,w,h（空 = 画面下方 40%）
+    std::string model_dir = "models/ocr";
+    double sample_fps = 1.0;
+};
+
+/// ocr：从视频硬字幕提取文本 → IR（vsf 找字幕段 + PP-OCR 识别）。
+int run_ocr(const OcrCommandOptions& options);
+
 /// convert：单个字幕文件（SRT/ASS/VTT）→ IR。
 int run_convert(const std::vector<std::string>& inputs, const std::string& language,
                 const std::string& out_path);
