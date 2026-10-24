@@ -9,6 +9,7 @@
 #include "iris/core/pipeline.hpp"
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/ui/console.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/ops/asr_pipeline.hpp"
 #include "iris/ops/translate.hpp"
@@ -96,9 +97,12 @@ int run_translate(const TranslateCommandOptions& opts) {
     core::PipelineContext ctx;
     ctx.doc = &doc;
     ctx.work_dir = work.string();
-    ctx.on_progress = [](const std::string& stage, float) { spdlog::info("→ 阶段: {}", stage); };
+    auto stages = std::make_shared<ui::StagePrinter>();
+    ctx.on_progress = [stages](const std::string& stage, float) { stages->begin(stage); };
 
-    if (!pipeline.run(ctx)) {
+    const bool pipeline_ok = pipeline.run(ctx);
+    stages->finish();
+    if (!pipeline_ok) {
         std::cerr << _("translate: pipeline failed (see log above)\n",
                        "translate: 管线执行失败（见上方日志）\n");
         return 1;

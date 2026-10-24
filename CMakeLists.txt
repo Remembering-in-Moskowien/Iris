@@ -61,6 +61,8 @@ add_library(iris_core
     src/ocr/rapid_ocr.cpp
     src/quality/report.cpp
     src/catalog/models.cpp
+    src/ui/console.cpp
+    src/infra/quiet.cpp
     src/server/http_server.cpp
     src/server/api.cpp
     src/subtitle/parser.cpp

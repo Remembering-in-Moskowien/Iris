@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "iris/infra/log.hpp"
+#include "iris/infra/quiet.hpp"
 
 #if IRIS_HAS_CRISPASR
 #include "crispasr.h"
@@ -75,6 +76,7 @@ bool Punctuator::open(const std::string& model, std::string& error) {
         ctx_ = nullptr;
     }
     const std::string name = model.empty() ? "auto" : model;
+    infra::StderrSilencer quiet;
     ctx_ = crispasr_punc_init(name.c_str());
     if (ctx_ == nullptr) {
         error = "punc: 无法加载标点模型 '" + name +

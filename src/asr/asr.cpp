@@ -10,6 +10,7 @@
 #include "iris/asr/onnx.hpp"
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/quiet.hpp"
 #include "iris/infra/threads.hpp"
 #include <ctranslate2/replica_pool.h>
 
@@ -61,6 +62,7 @@ bool transcribe_crispasr(AsrBackend backend, const std::string& model_path,
 
     const int n_threads = infra::resolve_threads(n_threads_override);
     spdlog::info("crispasr: 线程数 {}", n_threads);
+    infra::StderrSilencer quiet; // 运行时会把模型加载细节写到 stderr
     const char* crisp_backend = (backend == AsrBackend::Qwen3AsrGgml) ? "qwen3" : "whisper";
     crispasr_session* session =
         crispasr_session_open_explicit(model_path.c_str(), crisp_backend, n_threads);

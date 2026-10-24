@@ -5,6 +5,7 @@
 #include <thread>
 
 #include "iris/infra/log.hpp"
+#include "iris/infra/quiet.hpp"
 #include "iris/infra/threads.hpp"
 
 #if IRIS_HAS_CRISPASR
@@ -117,6 +118,7 @@ bool Translator::open(const TranslateOptions& options, std::string& error) {
     opts_.target = normalize_language(opts_.target);
 
     const int threads = infra::resolve_threads(opts_.n_threads);
+    infra::StderrSilencer quiet; // marian 会往 stderr 打每句日志
 
     // 后端：默认按 GGUF 自动识别；显式 --engine 时用映射后的名字（opus-mt → marian）。
     char backend[96] = {};

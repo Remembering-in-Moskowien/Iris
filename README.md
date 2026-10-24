@@ -312,3 +312,14 @@ input ─► FfmpegConvert ─► AudioPreprocess ─► Transcribe(crispasr) �
 ## License
 
 MIT — 见 [LICENSE](LICENSE)。
+
+## 终端体验
+
+自研终端呈现层（`src/ui/console.cpp`，参考 Centurion 的 Spectre.Console 语义色 + Ollama 的进度展示）：
+
+- 语义色：错误红粗、警告金、成功绿、强调青、次要灰；`NO_COLOR` / `IRIS_PLAIN=1` 自动退化为纯文本；
+- 符号表：`✓ ✗ → ▶ ● ○`，`IRIS_ASCII=1` 退化为 `OK / ERR / -> / >`；
+- 结构元素：banner、小节标题、按键值对齐的表格（按显示宽度对齐，中文占 2 列）；
+- 进度：下载时显示字节/速度/ETA 进度条；流水线逐阶段打印 `▶ 阶段` 与 `✓ 阶段 1.2s`；
+- 语言：自动跟随系统语言（Windows 读 `GetUserDefaultUILanguage`），也可用 `IRIS_LANG=zh|en` 固定；
+- 第三方推理库写到 stderr 的模型加载日志默认静音，`IRIS_VERBOSE=1` 可恢复。

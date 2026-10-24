@@ -7,6 +7,7 @@
 #include "iris/asr/asr.hpp"
 #include "iris/core/pipeline.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/ui/console.hpp"
 #include "iris/model/config.hpp"
 #include "iris/model/ir_document.hpp"
 #include "iris/ops/audio_preprocess.hpp"
@@ -76,9 +77,8 @@ int run_asr(const std::string& input, const std::string& language, const std::st
     core::PipelineContext ctx;
     ctx.doc = &doc;
     ctx.work_dir = work.string();
-    ctx.on_progress = [](const std::string& stage, float) {
-        spdlog::info("→ 阶段: {}", stage);
-    };
+    auto stages = std::make_shared<ui::StagePrinter>();
+    ctx.on_progress = [stages](const std::string& stage, float) { stages->begin(stage); };
 
     core::Pipeline pipeline;
     pipeline.add(std::make_shared<ops::FfmpegConvert>());
@@ -112,7 +112,9 @@ int run_asr(const std::string& input, const std::string& language, const std::st
         doc.config.command_name = "asr+diarize";
     }
 
-    if (!pipeline.run(ctx)) {
+    const bool pipeline_ok = pipeline.run(ctx);
+    stages->finish();
+    if (!pipeline_ok) {
         spdlog::error("asr: 管线执行失败");
         return 1;
     }

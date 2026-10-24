@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "iris/infra/log.hpp"
+#include "iris/infra/quiet.hpp"
 #include "iris/tts/gguf.hpp"
 #include "iris/tts/qwen3_session.hpp"
 #include "iris/tts/tts.hpp"
@@ -123,6 +124,7 @@ bool qwen3_open(const TtsRequest& req, Qwen3Session& out, std::string& error) {
         model_gguf.get_int("qwen3tts.n_codebooks"));
 
     const std::string backend = detect_backend(req.model);
+    infra::StderrSilencer quiet;
     auto* raw = crispasr_session_open_explicit(req.model.c_str(), backend.c_str(),
                                                resolve_tts_threads(req.n_threads));
     if (raw == nullptr) {

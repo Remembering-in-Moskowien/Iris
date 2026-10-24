@@ -12,6 +12,7 @@
 #include "iris/asr/onnx_funasr.hpp"
 #include "iris/catalog/models.hpp"
 #include "iris/server/api.hpp"
+#include "iris/ui/console.hpp"
 #include "iris/server/http_server.hpp"
 #include "iris/ocr/rapid_ocr.hpp"
 #include "iris/quality/report.hpp"
@@ -600,6 +601,27 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("ui: width-aware padding and human sizes", "[ui]") {
+    // CJK 按 2 列宽，ASCII 按 1 列宽
+    REQUIRE(iris::ui::display_width("abc") == 3);
+    REQUIRE(iris::ui::display_width("中文") == 4);
+    REQUIRE(iris::ui::display_width("a中b") == 4);
+
+    // 右补空格按显示宽度对齐
+    REQUIRE(iris::ui::pad_right("中文", 6) == "中文  ");
+    REQUIRE(iris::ui::pad_right("abc", 3) == "abc");
+    REQUIRE(iris::ui::pad_right("abcdef", 3) == "abcdef");
+
+    // 体积/时长格式化
+    REQUIRE(iris::ui::human_size(0) == "0 B");
+    REQUIRE(iris::ui::human_size(1536) == "2 KB");
+    REQUIRE(iris::ui::human_size(5 * 1024 * 1024) == "5 MB");
+    REQUIRE(iris::ui::human_size(3LL * 1024 * 1024 * 1024) == "3.0 GB");
+    REQUIRE(iris::ui::human_duration(0.5) == "0.5s");
+    REQUIRE(iris::ui::human_duration(12.0) == "12s");
+    REQUIRE(iris::ui::human_duration(95.0) == "1m 35s");
 }
 
 TEST_CASE("serve: http request parsing helpers", "[serve]") {

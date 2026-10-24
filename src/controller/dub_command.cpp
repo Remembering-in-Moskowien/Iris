@@ -11,6 +11,7 @@
 #include "iris/core/pipeline.hpp"
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/ui/console.hpp"
 #include <nlohmann/json.hpp>
 #include "iris/model/ir_document.hpp"
 #include "iris/ops/analyze_emotion.hpp"
@@ -210,9 +211,12 @@ int run_dub(const DubOptions& opts) {
     core::PipelineContext ctx;
     ctx.doc = &doc;
     ctx.work_dir = work.string();
-    ctx.on_progress = [](const std::string& stage, float) { spdlog::info("→ 阶段: {}", stage); };
+    auto stages = std::make_shared<ui::StagePrinter>();
+    ctx.on_progress = [stages](const std::string& stage, float) { stages->begin(stage); };
 
-    if (!pipeline.run(ctx)) {
+    const bool pipeline_ok = pipeline.run(ctx);
+    stages->finish();
+    if (!pipeline_ok) {
         std::cerr << _("dub: pipeline failed (see log above)\n",
                        "dub: 管线执行失败（见上方日志）\n");
         return 1;
