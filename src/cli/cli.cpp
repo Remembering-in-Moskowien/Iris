@@ -164,6 +164,14 @@ int run(int argc, char** argv) {
     dub->add_option("--out,-o", dub_opts.out_wav, "Output dub WAV path")->capture_default_str();
     dub->add_option("--ir-out", dub_opts.ir_out, "Also save the IR to this path");
     dub->add_option("--steps", dub_opts.steps, "TTS sampling steps (0 = backend default)");
+    dub->add_option("--voice", dub_opts.voice_refs,
+                    "Per-speaker reference audio: SPEAKER_1=path.wav (repeatable)")
+        ->expected(1, -1);
+    dub->add_option("--voice-text", dub_opts.voice_texts,
+                    "Per-speaker reference transcript: SPEAKER_1=text (repeatable)")
+        ->expected(1, -1);
+    dub->add_option("--voices", dub_opts.voices_json,
+                    "Voice config JSON: {default:{ref,ref_text}, speakers:{SPEAKER_1:{...}}}");
     dub->add_option("--threads", dub_opts.n_threads, "Inference threads (0 = auto, capped at 8)")
         ->capture_default_str();
     dub->add_option("--cfg", dub_opts.cfg_scale, "TTS CFG scale (0 = backend default)");

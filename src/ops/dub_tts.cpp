@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <memory>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -33,11 +35,12 @@ std::string cue_text(const model::Sentence& s) {
     return s.text;
 }
 
-/// 待配音的一句：时间码 + 文本。
+/// 待配音的一句：时间码 + 文本 + 说话人。
 struct Cue {
     std::int64_t start_ms = 0;
     std::int64_t end_ms = 0;
     std::string text;
+    std::string speaker;
 };
 
 std::vector<Cue> collect_cues(const model::Track& track) {
@@ -46,7 +49,8 @@ std::vector<Cue> collect_cues(const model::Track& track) {
         std::string text = cue_text(s);
         if (text.empty()) continue;
         cues.push_back({std::clamp<std::int64_t>(s.start_ms, 0, kMaxCueMs),
-                        std::clamp<std::int64_t>(s.end_ms, 0, kMaxCueMs), std::move(text)});
+                        std::clamp<std::int64_t>(s.end_ms, 0, kMaxCueMs), std::move(text),
+                        s.speaker.value_or(std::string())});
     }
     // 时间码必须单调递增，否则后面「下一句起点」会算成负数。
     for (std::size_t i = 1; i < cues.size(); ++i) {
@@ -60,6 +64,17 @@ double duration_s(std::size_t samples, int sample_rate) {
 }
 
 } // namespace
+
+const SpeakerVoice* find_voice(const std::string& speaker,
+                               const std::vector<SpeakerVoice>& voices) {
+    if (voices.empty()) return nullptr;
+    const SpeakerVoice* fallback = nullptr;
+    for (const auto& v : voices) {
+        if (!speaker.empty() && v.speaker == speaker) return &v;
+        if (v.speaker.empty() || v.speaker == "default") fallback = &v;
+    }
+    return fallback;
+}
 
 bool DubTts::execute(core::PipelineContext& ctx) {
     namespace fs = std::filesystem;
@@ -81,15 +96,35 @@ bool DubTts::execute(core::PipelineContext& ctx) {
     const fs::path out =
         opts_.output_path.empty() ? fs::path(ctx.work_dir) / kDubFileName : fs::path(opts_.output_path);
 
-    // 一次打开会话（加载模型 + 编码参考音频），逐句只做推理。
-    tts::TtsSession session;
-    {
-        std::string open_error;
-        if (!session.open(opts_.request, open_error)) {
-            spdlog::error("dub_tts: {}", open_error);
-            return false;
+    // 每个音色一条会话（模型只加载一次、参考音频只编码一次）；键为说话人标签，
+    // 空串代表默认音色。
+    std::map<std::string, std::unique_ptr<tts::TtsSession>> sessions;
+    std::size_t unmapped_warned = 0;
+
+    auto session_for = [&](const std::string& speaker) -> tts::TtsSession* {
+        const SpeakerVoice* voice = find_voice(speaker, opts_.voices);
+        const std::string key = (voice != nullptr && !voice->speaker.empty()) ? voice->speaker
+                                                                             : std::string();
+        if (const auto it = sessions.find(key); it != sessions.end()) return it->second.get();
+
+        tts::TtsRequest req = opts_.request;
+        if (voice != nullptr) {
+            if (!voice->ref_wav.empty()) req.ref_wav = voice->ref_wav;
+            if (!voice->ref_text.empty()) req.ref_text = voice->ref_text;
+            if (!voice->language.empty()) req.language = voice->language;
         }
-    }
+        auto session = std::make_unique<tts::TtsSession>();
+        std::string open_error;
+        if (!session->open(req, open_error)) {
+            spdlog::error("dub_tts: 音色 '{}' 打开失败：{}", key.empty() ? "default" : key, open_error);
+            return nullptr;
+        }
+        auto* raw = session.get();
+        spdlog::info("dub_tts: 音色 '{}' 就绪（ref={}）", key.empty() ? "default" : key,
+                     req.ref_wav.empty() ? "－" : req.ref_wav);
+        sessions.emplace(key, std::move(session));
+        return raw;
+    };
 
     std::vector<float> timeline;
     int sample_rate = 0;
@@ -101,9 +136,18 @@ bool DubTts::execute(core::PipelineContext& ctx) {
     for (std::size_t i = 0; i < cues.size(); ++i) {
         const Cue& cue = cues[i];
 
+        tts::TtsSession* session = session_for(cue.speaker);
+        if (session == nullptr) return false;
+        if (!cue.speaker.empty() && find_voice(cue.speaker, opts_.voices) == nullptr) {
+            if (unmapped_warned < 3) {
+                spdlog::warn("dub_tts: 说话人 '{}' 没有配置音色，使用默认音色", cue.speaker);
+                ++unmapped_warned;
+            }
+        }
+
         tts::TtsResult result;
         std::string error;
-        if (!session.synthesize(cue.text, result, error)) {
+        if (!session->synthesize(cue.text, result, error)) {
             spdlog::error("dub_tts: 第 {}/{} 句合成失败：{}", i + 1, total, error);
             return false;
         }

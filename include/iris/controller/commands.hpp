@@ -77,6 +77,9 @@ struct DubOptions {
     std::string asr_model;
     std::string emotion_model;
     std::string out_wav = "dub.wav";
+    std::vector<std::string> voice_refs;  ///< SPEAKER=参考音频（可重复）
+    std::vector<std::string> voice_texts; ///< SPEAKER=逐字稿（可重复）
+    std::string voices_json;              ///< 音色配置文件
     std::string ir_out; ///< 非空则把本次 IR 另存一份
     int steps = 0;
     int n_threads = 0; ///< 0 = 自动（min(8, 核数)）

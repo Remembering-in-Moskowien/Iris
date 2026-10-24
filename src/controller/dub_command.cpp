@@ -1,6 +1,8 @@
 #include "iris/controller/commands.hpp"
 
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -9,6 +11,7 @@
 #include "iris/core/pipeline.hpp"
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include <nlohmann/json.hpp>
 #include "iris/model/ir_document.hpp"
 #include "iris/ops/analyze_emotion.hpp"
 #include "iris/ops/asr_pipeline.hpp"
@@ -24,6 +27,58 @@ namespace {
 /// 输入是否为 IR（*.json）——是则跳过转写，直接对已有句子配音。
 bool is_ir_path(const std::string& path) {
     return fs::path(path).extension() == ".json";
+}
+
+/// 解析 "SPEAKER=value" 形式的重复选项（值里可以带 = 与空格）。
+std::vector<std::pair<std::string, std::string>> parse_pairs(const std::vector<std::string>& items) {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& item : items) {
+        const auto eq = item.find('=');
+        if (eq == std::string::npos || eq == 0) {
+            spdlog::warn("dub: 忽略无法解析的音色参数 '{}'（格式 SPEAKER=值）", item);
+            continue;
+        }
+        out.emplace_back(item.substr(0, eq), item.substr(eq + 1));
+    }
+    return out;
+}
+
+/// 读取 --voices 的 JSON：{"default": {...}, "speakers": {"SPEAKER_1": {...}}}。
+bool load_voices_json(const std::string& path, std::vector<ops::SpeakerVoice>& out,
+                      std::string& error) {
+    std::ifstream f(path);
+    if (!f) {
+        error = "无法打开音色配置：" + path;
+        return false;
+    }
+    nlohmann::json doc;
+    try {
+        f >> doc;
+    } catch (const std::exception& e) {
+        error = std::string("音色配置解析失败：") + e.what();
+        return false;
+    }
+    const auto read_one = [](const nlohmann::json& node, const std::string& speaker) {
+        ops::SpeakerVoice v;
+        v.speaker = speaker;
+        v.ref_wav = node.value("ref", node.value("refWav", std::string()));
+        v.ref_text = node.value("ref_text", node.value("refText", std::string()));
+        v.language = node.value("language", std::string());
+        return v;
+    };
+    if (doc.contains("default") && doc["default"].is_object()) {
+        out.push_back(read_one(doc["default"], "default"));
+    }
+    if (doc.contains("speakers") && doc["speakers"].is_object()) {
+        for (const auto& [speaker, node] : doc["speakers"].items()) {
+            if (node.is_object()) out.push_back(read_one(node, speaker));
+        }
+    }
+    if (out.empty()) {
+        error = "音色配置里没有 default / speakers 条目：" + path;
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -120,6 +175,36 @@ int run_dub(const DubOptions& opts) {
     dub.fit_timing = opts.fit_timing;
     dub.gap_ms = opts.gap_ms;
     dub.max_speed = opts.max_speed;
+
+    // 多音色：JSON 配置 + 命令行 SPEAKER=ref / SPEAKER=逐字稿
+    if (!opts.voices_json.empty()) {
+        std::string voice_error;
+        if (!load_voices_json(opts.voices_json, dub.voices, voice_error)) {
+            std::cerr << "dub: " << voice_error << '\n';
+            return 1;
+        }
+    }
+    auto merge_voice = [&](const std::string& speaker, const std::string& value, bool is_text) {
+        auto it = std::find_if(dub.voices.begin(), dub.voices.end(),
+                               [&](const ops::SpeakerVoice& v) { return v.speaker == speaker; });
+        if (it == dub.voices.end()) {
+            ops::SpeakerVoice v;
+            v.speaker = speaker;
+            dub.voices.push_back(v);
+            it = std::prev(dub.voices.end());
+        }
+        if (is_text) {
+            it->ref_text = value;
+        } else {
+            it->ref_wav = value;
+        }
+    };
+    for (const auto& [speaker, path] : parse_pairs(opts.voice_refs)) merge_voice(speaker, path, false);
+    for (const auto& [speaker, text] : parse_pairs(opts.voice_texts)) merge_voice(speaker, text, true);
+    if (!dub.voices.empty()) {
+        spdlog::info("dub: 多音色 {} 个", dub.voices.size());
+    }
+
     pipeline.add(std::make_shared<ops::DubTts>(std::move(dub)));
 
     core::PipelineContext ctx;

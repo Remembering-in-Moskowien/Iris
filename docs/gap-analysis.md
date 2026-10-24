@@ -94,7 +94,7 @@ C# `Centurion.Models` 里 iris 目前缺的字段：
 | P1 | 字幕导入（convert/combine）+ 剧本导入（from-script） | 「已有字幕→IR」入口 | 🟡 convert/combine 已做，from-script 待做 |
 | P1 | OCR（VideoSubFinder 取帧 + OCR provider） | 硬字幕视频的入口；`vsf` 已实现取帧部分 | ⏳ 待做 |
 | P1 | 标点恢复 | 中文 ASR（Paraformer/SenseVoice）默认不带标点 | ✅ `asr --punc`（FireRedPunc） |
-| P1 | dub 接入说话人（多音色） | 分割标签已有，差「按 speaker 选音色」 | ⏳ 待做 |
+| P1 | dub 接入说话人（多音色） | 分割标签已有，差「按 speaker 选音色」 | ✅ `dub --voice SPEAKER=ref.wav` / `--voices voices.json` |
 | P2 | 质量报告（Quality* + HTML） | 依赖校正/对齐数据先齐 | ⏳ 待做 |
 | P2 | LLM 翻译/分句、云 provider、REST、`migrate`、`update` | 依赖模型与密钥体系 | ⏳ 待做 |
 

@@ -9,6 +9,19 @@
 
 namespace iris::ops {
 
+/// 单个说话人使用的音色（参考音频 + 逐字稿 + 可选语言）。
+///
+/// 对应 C# 的 PolyVoice 配音：按 IR 里的 `speaker` 标签选不同音色。
+struct SpeakerVoice {
+    std::string speaker;  ///< 标签（如 SPEAKER_1）；空串 = 默认音色
+    std::string ref_wav;  ///< 参考音频（空 = 沿用全局 --ref）
+    std::string ref_text; ///< 参考音频逐字稿（空 = 沿用全局 --ref-text）
+    std::string language; ///< 空 = 沿用全局 --language
+};
+
+/// 按说话人标签选音色：精确匹配优先，其次 "default" 条目；都没有返回 nullptr。
+const SpeakerVoice* find_voice(const std::string& speaker, const std::vector<SpeakerVoice>& voices);
+
 /// 对应 C# Dub 的合成段：把 IR 里的句子逐条 TTS，并按起始时间码拼成一条配音音轨。
 ///
 /// 输入：IR state.tracks 中的句子（优先 translatedText，回退 text）。
@@ -17,6 +30,9 @@ namespace iris::ops {
 /// 时长对齐（默认开启）：合成结果先裁掉首尾静音，再压到原句时隙内
 /// （自研 WSOLA 变速不变调，最多 max_speed 倍）；压到上限仍放不下的部分，
 /// 让下一句顺延，保证句间始终留有 gap_ms 的停顿，且不截断语音。
+///
+/// 多音色：`voices` 里有该句 speaker 的条目时用它的参考音频/语言，
+/// 每个音色各自复用一条 TTS 会话（模型只加载一次、参考音频只编码一次）。
 class DubTts : public core::Operator {
 public:
     struct Options {
@@ -26,6 +42,7 @@ public:
         bool fit_timing = true;    ///< 按原句时间码对齐时长
         int gap_ms = 200;          ///< 句间最小停顿（ms）
         float max_speed = 1.2f;    ///< 时长压缩的变速上限
+        std::vector<SpeakerVoice> voices; ///< 说话人 → 音色（空 = 全部用默认音色）
     };
 
     explicit DubTts(Options opts) : opts_(std::move(opts)) {}

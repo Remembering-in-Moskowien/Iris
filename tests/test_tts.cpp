@@ -9,6 +9,7 @@
 
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/onnx_funasr.hpp"
+#include "iris/ops/dub_tts.hpp"
 #include "iris/ops/sentence_split.hpp"
 #include "iris/subtitle/combine.hpp"
 #include "iris/subtitle/parser.hpp"
@@ -593,6 +594,33 @@ TEST_CASE("sat: XLM-R tokenizer and boundary mapping", "[sat]") {
         REQUIRE(t.id != tokenizer.unk_id()); // 常见英文不应出现 unk
         REQUIRE(t.end >= t.start);
     }
+}
+
+TEST_CASE("dub: per-speaker voice selection", "[dub]") {
+    std::vector<iris::ops::SpeakerVoice> voices;
+    iris::ops::SpeakerVoice a;
+    a.speaker = "SPEAKER_1";
+    a.ref_wav = "a.wav";
+    iris::ops::SpeakerVoice b;
+    b.speaker = "SPEAKER_2";
+    b.ref_wav = "b.wav";
+    iris::ops::SpeakerVoice def;
+    def.speaker = "default";
+    def.ref_wav = "default.wav";
+    voices = {a, b, def};
+
+    // 精确匹配
+    REQUIRE(iris::ops::find_voice("SPEAKER_2", voices) == &voices[1]);
+    // 未知说话人 → default
+    REQUIRE(iris::ops::find_voice("SPEAKER_9", voices) == &voices[2]);
+    // 无标签（没有做说话人分割）→ 落 default
+    REQUIRE(iris::ops::find_voice("", voices) == &voices[2]);
+    // 没有配置 → nullptr
+    REQUIRE(iris::ops::find_voice("SPEAKER_1", {}) == nullptr);
+
+    // 没有 default 条目时，未知说话人不映射
+    std::vector<iris::ops::SpeakerVoice> only_two = {a, b};
+    REQUIRE(iris::ops::find_voice("SPEAKER_3", only_two) == nullptr);
 }
 
 TEST_CASE("dub timeline mix places cues at their offsets") {
