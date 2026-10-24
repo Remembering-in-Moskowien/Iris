@@ -185,6 +185,60 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-dub.ps1
 
 ---
 
+## 翻译链路（非 LLM 的 NMT）
+
+`translate` 走 **MarianMT / OPUS-MT、M2M100、WMT21、MADLAD** 这类经典编码器-解码器
+NMT 模型（不是 LLM），同样在进程内跑（CrispASR 的 `crispasr_session_translate_text`）。
+产出 IR 的 `translation` 轨道（每句保留原文 `text`，译文写 `translatedText`），
+`dub` 会自动优先用译文配音。
+
+| 模型 | GGUF | 语言 | 大小 |
+|---|---|---|---|
+| M2M100-418M | `cstr/m2m100-418m-GGUF` | 100 语言任意方向（含 en↔zh） | 285 MB(q4_k) / 526 MB(q8_0) |
+| OPUS-MT / Marian | `cstr/opus-mt-<src>-<tgt>-GGUF` | 单方向（官方托管 24 个方向）；en↔zh 需自行转换，见下 | 84–160 MB |
+
+```bash
+# IR → 译文 IR（en → zh）
+build/bin/iris translate out.iris.json \
+  -m models/translation/m2m100-418m-q8_0.gguf --from en --to zh \
+  --out out.zh.iris.json
+
+# 媒体一步到位（内部先跑 ASR）
+build/bin/iris translate demo.mp4 -m models/translation/m2m100-418m-q8_0.gguf \
+  --from en --to zh --asr-engine whisper --asr-model models/ggml/ggml-base.bin
+
+# 接配音（dub 会用 translation 轨道的译文）
+build/bin/iris dub out.zh.iris.json --model models/qwen3-tts/... --codec ... --out dub.zh.wav
+```
+
+要点：
+
+- `--engine auto`（默认）按 GGUF 自动识别后端；想强制 OPUS-MT 就 `--engine opus-mt`（映射到 `marian`）。
+- MT 模型默认 **beam=5**（checkpoint 的 `num_beams`），贪心会退化成复读；`--beam 1` 可关。
+- 中文目标会自动做标点/空格归一（半角→全角、去掉汉字旁空格）。
+- **OPUS-MT en↔zh 的转换**（一次性，需要 Python + torch）：
+
+  ```bash
+  # 1) 取 HF 原始权重（config.json / source.spm / target.spm / vocab.json / pytorch_model.bin）
+  # 2) 用 CrispASR 的转换脚本
+  python models/convert-marian-to-gguf.py \
+      --input  <opus-mt-en-zh 目录> \
+      --output models/translation/opus-mt-en-zh-f16.gguf
+  # 3) iris translate ... --engine opus-mt -m models/translation/opus-mt-en-zh-f16.gguf
+  ```
+
+  本仓库已实测：`Helsinki-NLP/opus-mt-en-zh` → 160 MB F16 GGUF，
+  两句 1.0 s/句（CPU），译文「所以，我的美国同胞们，不要问你们的国家能为你做什么，问什么」。
+
+一键复跑：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.iris.json
+# 输出：译文 + IR 校验 + 汉字数量 + [OK] 翻译链路通畅
+```
+
+---
+
 ## 命令
 
 | 命令 | 用途 | 状态 |
