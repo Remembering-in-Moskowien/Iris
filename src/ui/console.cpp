@@ -92,6 +92,76 @@ const Symbols& symbols_impl() {
     return sym;
 }
 
+// ---- Windows 控制台输出（WriteConsoleW，绕开代码页）----
+#ifdef _WIN32
+bool is_console_handle(HANDLE h) {
+    DWORD mode = 0;
+    return h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode) != 0;
+}
+
+void write_console_wide(const std::string& utf8, HANDLE handle) {
+    if (utf8.empty()) return;
+    const int need = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
+                                         nullptr, 0);
+    if (need <= 0) return;
+    std::wstring wide(static_cast<std::size_t>(need), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), wide.data(), need);
+    DWORD written = 0;
+    if (WriteConsoleW(handle, wide.data(), static_cast<DWORD>(wide.size()), &written, nullptr) == 0) {
+        // 极端情况下（句柄不可写等）退回按字节写，保证输出不丢
+        WriteFile(handle, utf8.data(), static_cast<DWORD>(utf8.size()), &written, nullptr);
+    }
+}
+#endif
+
+/// 接管 std::cout / std::cerr：控制台上逐行用 WriteConsoleW 输出，
+/// 重定向时按 UTF-8 字节写文件（保持可管道、可解析）。
+class ConsoleBuf : public std::streambuf {
+public:
+    ConsoleBuf(bool to_stderr, bool console) : to_stderr_(to_stderr), console_(console) {}
+
+protected:
+    int_type overflow(int_type c) override {
+        if (c == traits_type::eof()) return traits_type::not_eof(c);
+        buf_.push_back(static_cast<char>(c));
+        if (c == '\n') flush_buffer();
+        return c;
+    }
+
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        buf_.append(s, static_cast<std::size_t>(n));
+        if (buf_.find('\n') != std::string::npos) flush_buffer();
+        if (buf_.size() > 8192) flush_buffer();
+        return n;
+    }
+
+    int sync() override {
+        flush_buffer();
+        return 0;
+    }
+
+private:
+    void flush_buffer() {
+        if (buf_.empty()) return;
+        if (console_) {
+#ifdef _WIN32
+            write_console_wide(buf_, GetStdHandle(to_stderr_ ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE));
+#else
+            std::fwrite(buf_.data(), 1, buf_.size(), to_stderr_ ? stderr : stdout);
+            std::fflush(to_stderr_ ? stderr : stdout);
+#endif
+        } else {
+            std::fwrite(buf_.data(), 1, buf_.size(), to_stderr_ ? stderr : stdout);
+            std::fflush(to_stderr_ ? stderr : stdout);
+        }
+        buf_.clear();
+    }
+
+    std::string buf_;
+    bool to_stderr_ = false;
+    bool console_ = false;
+};
+
 std::int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -102,22 +172,53 @@ std::int64_t now_ms() {
 
 void init() {
     std::call_once(g_init_once, [] {
+        const bool plain_output = env_set("IRIS_PLAIN_OUTPUT");
 #ifdef _WIN32
-        SetConsoleOutputCP(CP_UTF8);
-        SetConsoleCP(CP_UTF8);
-        if (HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE); h != INVALID_HANDLE_VALUE) {
-            DWORD mode = 0;
-            if (GetConsoleMode(h, &mode)) {
-                SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        const bool out_console = is_console_handle(GetStdHandle(STD_OUTPUT_HANDLE));
+        const bool err_console = is_console_handle(GetStdHandle(STD_ERROR_HANDLE));
+        g_tty.store(out_console);
+        // VT 序列（颜色）只在控制台上需要开启；代码页不再改动，
+        // 输出一律走 WriteConsoleW，所以用户 shell 的代码页不受影响。
+        if (out_console) {
+            if (HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE); h != INVALID_HANDLE_VALUE) {
+                DWORD mode = 0;
+                if (GetConsoleMode(h, &mode)) {
+                    SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+                }
             }
         }
-        g_tty.store(_isatty(_fileno(stdout)) != 0);
+        if (!plain_output) {
+            static ConsoleBuf out_buf(false, out_console);
+            static ConsoleBuf err_buf(true, err_console);
+            std::cout.rdbuf(&out_buf);
+            std::cerr.rdbuf(&err_buf);
+        }
 #else
         g_tty.store(::isatty(STDOUT_FILENO) != 0);
+        if (!plain_output) {
+            static ConsoleBuf out_buf(false, false);
+            static ConsoleBuf err_buf(true, false);
+            std::cout.rdbuf(&out_buf);
+            std::cerr.rdbuf(&err_buf);
+        }
 #endif
         g_colors.store(g_tty.load() && !env_set("NO_COLOR") && !env_set("IRIS_PLAIN"));
         g_unicode.store(!env_set("IRIS_ASCII"));
     });
+}
+
+void write_utf8(const std::string& text, bool to_stderr) {
+    init();
+#ifdef _WIN32
+    HANDLE h = GetStdHandle(to_stderr ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE);
+    if (is_console_handle(h)) {
+        write_console_wide(text, h);
+        return;
+    }
+#endif
+    std::FILE* f = to_stderr ? stderr : stdout;
+    std::fwrite(text.data(), 1, text.size(), f);
+    std::fflush(f);
 }
 
 bool colors_enabled() {

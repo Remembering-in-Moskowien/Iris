@@ -28,8 +28,12 @@ struct Symbols {
     bool unicode = true;
 };
 
-/// 初始化（Windows 上开启 ANSI 与 UTF-8 输出）。重复调用无副作用。
+/// 初始化（Windows 上开启 ANSI，并把 stdout/stderr 接管为宽字符控制台输出）。
+/// 重复调用无副作用。
 void init();
+
+/// 直接写一段 UTF-8 文本到控制台（Windows 走 WriteConsoleW，重定向时写字节）。
+void write_utf8(const std::string& text, bool to_stderr = false);
 
 /// 是否启用颜色（TTY 且未设置 NO_COLOR / IRIS_PLAIN）。
 bool colors_enabled();
