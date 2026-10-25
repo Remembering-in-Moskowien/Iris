@@ -1,0 +1,5 @@
+# 术语表：`from<TAB>to`，匹配大小写不敏感
+# iris correct --glossary docs/rules/glossary.tsv
+赛蕾丝蒂亚	塞拉斯蒂娅
+塞拉斯蒂亚	塞拉斯蒂娅
+Celestia	塞拉斯蒂娅

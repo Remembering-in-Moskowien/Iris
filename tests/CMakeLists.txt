@@ -5,6 +5,12 @@ add_executable(iris_tests
     test_time.cpp
     test_ass.cpp
     test_ir.cpp
+    test_lint.cpp
+    test_build.cpp
+    test_karaoke.cpp
+    test_rules.cpp
+    test_align.cpp
+    test_project.cpp
     test_tts.cpp)
 target_link_libraries(iris_tests PRIVATE iris_core Catch2::Catch2WithMain)
 target_compile_options(iris_tests PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)

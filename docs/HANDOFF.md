@@ -38,7 +38,7 @@ iris 是 **Centurion（C#/.NET 10）的 C++20 迁移**：媒体 → 字幕/配�
 
 - 顶层命令：**15/16**（只缺 `update`；`migrate` 无需求）
 - 链路：媒体/字幕/剧本/硬字幕四类入口全部打通
-- 测试：**44/44 通过**（`ctest --test-dir build -C Release`）
+- 测试：**78/78 通过**（`ctest --test-dir build -C Release`；lint 7 + build 8 + karaoke 7 + rules/diff 6 + align 3 + project 2）
 - 发布：多平台 GitHub Actions（Windows/Linux/macOS），按 `run_number` 出 `v{n}`
 
 ## 4. 关键决策（改动前先读）
@@ -51,6 +51,12 @@ iris 是 **Centurion（C#/.NET 10）的 C++20 迁移**：媒体 → 字幕/配�
 5. **CLI 参数**：`main.cpp` 用 `GetCommandLineW` 重建 UTF-8 argv（否则中文参数变 GBK）。
 6. **数据目录**：`<安装盘>:/iris`（`IRIS_HOME` 可覆盖），配置 `config.json`，模型相对 `modelsDir`；旧 `%APPDATA%` 配置会自动迁移。
 7. **`--agent` / `--json`**：前者给带前缀的人类行，后者 stdout 只放一个 JSON 文档（日志转 stderr，`std::cout` 被换成空缓冲）。
+8. **IR 1.0 加法字段**：`state.styles` / `scriptInfo` / `timelineOffsetMs`、`sentence.style` / `raw` /
+   `layer` / `comment`、`track.kind`；旧 IR 缺省即兼容，schemaVersion 仍是 "1.0"。
+9. **成品保真**：`convert` 走 `subtitle::AssScript`（全字段样式 + 原始标签）；`build` 无模板时
+   用 IR 样式原样回写。ASS→IR→ASS 在 255 部成品上语义比对 0 差异（未定义样式按文本语言回退）。
+10. **路径编码**：Windows 上一律 `infra::utf8_path()` 开文件；不要用 `fs::path(std::string)`
+    （按本地代码页解释，中文/全角冒号路径会抛异常）。
 
 ## 5. 已踩过的坑（别重犯）
 
@@ -64,6 +70,8 @@ iris 是 **Centurion（C#/.NET 10）的 C++20 迁移**：媒体 → 字幕/配�
 | PowerShell `here-string` 写中文源码 | 文件变 GBK 乱码/语法错 | 用 `write`/`edit` 工具改文件 |
 | `run_process` 先等进程再读管道 | 输出 >64 KB 死锁 | 用线程并发排空（`run_process_split`） |
 | `sentence_split` 按字节切 | 汉字被劈开 → IR 非法 UTF-8 | 按 UTF-8 字符推进 |
+| 子进程命令行按字节转 wchar | 中文/全角路径传给 ffmpeg 变 `æ å­å¹`，报“文件不存在” | 参数整串 `MultiByteToWideChar(CP_UTF8)` 再拼命令行 |
+| `correct` 消重叠删行 | 注释/歌词/未知样式被前一句覆盖时整行丢弃 | 按**样式名**分桶 + 歌词行豁免 + 完全覆盖时保留重叠 |
 
 ## 6. 环境与命令
 
@@ -80,6 +88,15 @@ iris asr in.mp4 -l zh --punc --diarize --split sat
 iris translate in.iris.json --from zh --to en -m models/translation/m2m100-418m-q8_0.gguf
 iris dub in.iris.json --ref voice.wav --ref-text "..." --voice SPEAKER_2=other.wav
 iris quality in.iris.json          # HTML 报告；有 error 时 exit 2
+iris lint 作品目录 --fonts 字体目录 -o lint.html   # 成品只读体检 + 歌词待补清单
+iris style extract 成品.ass -o theme.json         # 从成品反推样式模板
+iris build in.iris.json --bilingual --template theme.json --shift +1:10:27.30
+iris karaoke out.iris.json -o out.k.iris.json    # 打 \K（投影 / 词级 / 均分）
+iris correct out.iris.json --rules docs/rules/mlp.rules --glossary docs/rules/glossary.tsv
+iris diff out.iris.json --reference 参考.ass --cjk-only
+iris align 视频.mkv --ir out.iris.json --model models/aligner/qwen3-forced-aligner-0.6b-q4_k.gguf
+iris project scan 作品目录 --html ledger.html      # 只读台账
+iris project run 作品目录 --out-dir iris-out       # 批量流水线（可增量）
 iris --json asr in.mp4 ...        # 单 JSON 文档
 iris serve --port 8080            # REST（POST /jobs, GET /jobs/{id}）
 ```
@@ -96,6 +113,9 @@ iris serve --port 8080            # REST（POST /jobs, GET /jobs/{id}）
 6. **OCR 增强**：竖排/多行合并、`--roi` 自动多带（现在只取最密集一带）。
 7. **LLM 能力**（P2 剩余）：`--split llm`、LLM 翻译，需要 provider 抽象 + 密钥配置（`config.json` 加 `llm` 段）。
 8. **性能**：TTS codec 解码占 43%，可考虑缓存/量化；asr 的 Ct2 路径可尝试 int8。
+9. **`align`（音频强制对齐）**：已实现（`align` 命令 + `qwen3-forced-aligner` 模型条目），
+   逐句调用 `crispasr_align_words_abi` 写 `Sentence.words`，`karaoke` 自动吃；
+   ⚠️ 本机网络不通、模型未下载，**运行时路径尚未端到端验证**（`--dry-run` 已验证解码与句子统计）。
 
 ## 8. 已知限制
 

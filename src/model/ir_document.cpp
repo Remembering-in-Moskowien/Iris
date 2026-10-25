@@ -4,6 +4,8 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "iris/infra/paths.hpp"
+
 namespace iris::model {
 
 namespace {
@@ -130,6 +132,11 @@ nlohmann::json Sentence::to_json() const {
     nlohmann::json j = {{"startMs", start_ms}, {"endMs", end_ms}, {"text", text}};
     if (translated_text) j["translatedText"] = *translated_text;
     if (speaker) j["speaker"] = *speaker;
+    if (style) j["style"] = *style;
+    if (raw) j["raw"] = *raw;
+    if (translated_raw) j["translatedRaw"] = *translated_raw;
+    if (layer != 0) j["layer"] = layer;
+    if (comment) j["comment"] = true;
     if (!words.empty()) {
         j["words"] = nlohmann::json::array();
         for (const auto& w : words) j["words"].push_back(w.to_json());
@@ -144,6 +151,11 @@ Sentence Sentence::from_json(const nlohmann::json& j) {
     s.text = j.value("text", std::string());
     set_opt(j, "translatedText", s.translated_text);
     set_opt(j, "speaker", s.speaker);
+    set_opt(j, "style", s.style);
+    set_opt(j, "raw", s.raw);
+    set_opt(j, "translatedRaw", s.translated_raw);
+    s.layer = j.value("layer", 0);
+    s.comment = j.value("comment", false);
     if (j.contains("words") && j["words"].is_array()) {
         for (const auto& w : j["words"]) s.words.push_back(Word::from_json(w));
     }
@@ -152,6 +164,7 @@ Sentence Sentence::from_json(const nlohmann::json& j) {
 
 nlohmann::json Track::to_json() const {
     nlohmann::json j = {{"type", type}, {"language", language}};
+    if (!kind.empty() && kind != "dialogue") j["kind"] = kind;
     j["sentences"] = nlohmann::json::array();
     for (const auto& s : sentences) j["sentences"].push_back(s.to_json());
     return j;
@@ -161,6 +174,7 @@ Track Track::from_json(const nlohmann::json& j) {
     Track t;
     t.type = j.value("type", std::string());
     t.language = j.value("language", std::string());
+    t.kind = j.value("kind", std::string("dialogue"));
     if (j.contains("sentences") && j["sentences"].is_array()) {
         for (const auto& s : j["sentences"]) t.sentences.push_back(Sentence::from_json(s));
     }
@@ -177,6 +191,15 @@ nlohmann::json WorkflowState::to_json() const {
     if (preprocessed_audio_path) j["preprocessedAudioPath"] = *preprocessed_audio_path;
     if (vocals_path) j["vocalsPath"] = *vocals_path;
     if (dubbed_audio_path) j["dubbedAudioPath"] = *dubbed_audio_path;
+    if (!styles.empty()) {
+        j["styles"] = nlohmann::json::array();
+        for (const auto& s : styles) j["styles"].push_back(s.to_json());
+    }
+    if (!script_info.empty()) {
+        j["scriptInfo"] = nlohmann::json::array();
+        for (const auto& [k, v] : script_info) j["scriptInfo"].push_back({k, v});
+    }
+    if (timeline_offset_ms != 0) j["timelineOffsetMs"] = timeline_offset_ms;
     if (!tracks.empty()) {
         j["tracks"] = nlohmann::json::array();
         for (const auto& t : tracks) j["tracks"].push_back(t.to_json());
@@ -191,6 +214,16 @@ WorkflowState WorkflowState::from_json(const nlohmann::json& j) {
     set_opt(j, "preprocessedAudioPath", st.preprocessed_audio_path);
     set_opt(j, "vocalsPath", st.vocals_path);
     set_opt(j, "dubbedAudioPath", st.dubbed_audio_path);
+    if (j.contains("styles") && j["styles"].is_array()) {
+        for (const auto& s : j["styles"]) st.styles.push_back(subtitle::AssStyle::from_json(s));
+    }
+    if (j.contains("scriptInfo") && j["scriptInfo"].is_array()) {
+        for (const auto& kv : j["scriptInfo"]) {
+            if (kv.is_array() && kv.size() == 2)
+                st.script_info.emplace_back(kv[0].get<std::string>(), kv[1].get<std::string>());
+        }
+    }
+    st.timeline_offset_ms = j.value("timelineOffsetMs", std::int64_t{0});
     if (j.contains("tracks") && j["tracks"].is_array()) {
         for (const auto& t : j["tracks"]) st.tracks.push_back(Track::from_json(t));
     }
@@ -232,7 +265,7 @@ std::string IrDocument::dump(int indent) const {
 }
 
 IrDocument IrDocument::load(const std::string& path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(infra::utf8_path(path), std::ios::binary);
     if (!in) throw std::runtime_error("无法打开 IR 文件: " + path);
     nlohmann::json j = nlohmann::json::parse(in, nullptr, false);
     if (j.is_discarded()) throw std::runtime_error("IR 文件不是合法 JSON: " + path);
@@ -240,7 +273,7 @@ IrDocument IrDocument::load(const std::string& path) {
 }
 
 void IrDocument::save(const std::string& path) const {
-    std::ofstream out(path, std::ios::binary);
+    std::ofstream out(infra::utf8_path(path), std::ios::binary);
     if (!out) throw std::runtime_error("无法写入 IR 文件: " + path);
     out << dump(2) << '\n';
 }

@@ -1,6 +1,9 @@
 #include "iris/cli/cli.hpp"
 
+#include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -25,6 +28,39 @@ std::string resolve_punc_model(const std::string& requested) {
     if (!requested.empty() && requested != "auto") return requested;
     const std::string local = iris::text::default_punc_model();
     return local.empty() ? std::string("auto") : local;
+}
+
+/// 解析 --shift：`+1:10:27.30`、`-0:00:02.500` 或 `+4227.3`（秒）→ 毫秒。
+bool parse_shift_ms(const std::string& text, std::int64_t& out) {
+    std::string s = text;
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    if (s.empty()) return false;
+
+    double sign = 1.0;
+    if (s.front() == '+') {
+        s.erase(s.begin());
+    } else if (s.front() == '-') {
+        sign = -1.0;
+        s.erase(s.begin());
+    }
+
+    double seconds = 0.0;
+    const auto first = s.find(':');
+    if (first == std::string::npos) {
+        char* end = nullptr;
+        seconds = std::strtod(s.c_str(), &end);
+        if (end == s.c_str() || *end != '\0') return false;
+    } else {
+        const auto second = s.find(':', first + 1);
+        if (second == std::string::npos) return false;
+        const double h = std::atof(s.substr(0, first).c_str());
+        const double m = std::atof(s.substr(first + 1, second - first - 1).c_str());
+        const double sec = std::atof(s.substr(second + 1).c_str());
+        seconds = h * 3600.0 + m * 60.0 + sec;
+    }
+    out = static_cast<std::int64_t>(std::llround(sign * seconds * 1000.0));
+    return true;
 }
 
 } // namespace
@@ -94,11 +130,22 @@ int run(int argc, char** argv) {
 
     // ---- build ----
     auto* build = app.add_subcommand("build", "Render an IR file to subtitles");
-    std::string build_ir, build_fmt = "ass", build_out;
+    std::string build_ir, build_fmt = "ass", build_out, build_shift;
+    view::AssBuildOptions build_opts;
+    bool build_lf = false;
     build->add_option("ir", build_ir, "IR file (*.iris.json)")->required();
     build->add_option("--format,-f", build_fmt, "ass|srt|txt")
         ->check(CLI::IsMember({"ass", "srt", "txt"}));
     build->add_option("--output,-o", build_out, "Output path");
+    build->add_option("--template,-t", build_opts.template_path,
+                      "Style template (.json, or an .ass/.ssa to extract from)");
+    build->add_flag("--bilingual", build_opts.bilingual,
+                    "Emit translated + original lines with the same timecode");
+    build->add_option("--shift", build_shift, "Global shift: +1:10:27.30 or +4227.3 (seconds)");
+    build->add_option("--scale", build_opts.scale, "Canvas/font scale (2 = 4K)")
+        ->capture_default_str();
+    build->add_flag("--bom", build_opts.bom, "Write UTF-8 BOM");
+    build->add_flag("--lf", build_lf, "Write LF instead of CRLF");
 
     // ---- validate ----
     auto* validate = app.add_subcommand("validate", "Validate an IR file");
@@ -281,6 +328,27 @@ int run(int argc, char** argv) {
     quality->add_option("ir", quality_ir, "IR file (*.iris.json)")->required();
     quality->add_option("--out,-o", quality_out, "Output HTML path (default: <ir>.quality.html)");
 
+    // ---- lint ----
+    auto* lint = app.add_subcommand(
+        "lint", "Read-only ASS/SSA checkup (styles, karaoke, CPS, overlaps, fonts) → HTML report");
+    std::vector<std::string> lint_inputs;
+    std::string lint_html;
+    iris::quality::LintOptions lint_opts;
+    bool lint_no_fonts = false;
+    lint->add_option("paths", lint_inputs, "ASS/SSA files or directories")->required();
+    lint->add_option("--out,-o", lint_html, "HTML report path (default: iris-lint.html)");
+    lint->add_option("--fonts", lint_opts.font_dirs, "Extra font directory (repeatable)");
+    lint->add_flag("--no-fonts", lint_no_fonts, "Skip font existence checks");
+    lint->add_option("--zh-cps", lint_opts.zh_max_cps, "Chinese CPS limit (default 8)")
+        ->capture_default_str();
+    lint->add_option("--en-cps", lint_opts.en_max_cps, "Latin CPS limit (default 25)")
+        ->capture_default_str();
+    lint->add_option("--max-cjk", lint_opts.max_cjk_chars, "Max CJK chars per line (default 20)")
+        ->capture_default_str();
+    lint->add_option("--max-issues", lint_opts.max_issues_per_file,
+                     "Issues listed per file in the report (default 60)")
+        ->capture_default_str();
+
     // ---- ocr ----
     auto* ocr = app.add_subcommand("ocr", "Extract hard-coded subtitles from a video into an IR");
     controller::OcrCommandOptions ocr_opts;
@@ -306,15 +374,112 @@ int run(int argc, char** argv) {
     combine->add_option("--out,-o", combine_out, "Output IR path");
     combine->add_option("--language,-l", combine_lang, "Language code")->capture_default_str();
     bool combine_bilingual = false;
+    bool combine_text = false;
     combine->add_flag("--bilingual", combine_bilingual,
                       "Treat the second file as the translation of the first");
+    combine->add_flag("--text", combine_text,
+                      "Second input is a plain-text translation (one line per cue, paired by order)");
 
     // ---- correct ----
     auto* correct = app.add_subcommand(
-        "correct", "Clean up an IR: whitespace, punctuation, empty cues, timings/overlaps");
-    std::string correct_ir, correct_out;
+        "correct", "Clean up an IR: whitespace, punctuation, timings, rules and glossary");
+    std::string correct_ir;
+    controller::CorrectCommandOptions correct_opts;
     correct->add_option("ir", correct_ir, "IR file (*.iris.json)")->required();
-    correct->add_option("--out,-o", correct_out, "Output IR path (default: in place)");
+    correct->add_option("--out,-o", correct_opts.out_path, "Output IR path (default: in place)");
+    correct->add_option("--rules", correct_opts.rules_path,
+                        "Rule file: `pattern => replacement`, or @macro (see docs/rules/mlp.rules)");
+    correct->add_option("--glossary", correct_opts.glossary_path,
+                        "Glossary: `<from><TAB><to>` per line");
+    correct->add_flag("--dry-run", correct_opts.dry_run, "Show changes without writing");
+    correct->add_option("--samples", correct_opts.samples, "How many changed lines to print")
+        ->capture_default_str();
+
+    // ---- align ----
+    auto* align = app.add_subcommand(
+        "align", "Forced alignment: add word/character timings to an IR (Qwen3-ForcedAligner)");
+    std::string align_media, align_ir, align_out;
+    asr::AlignOptions align_opts;
+    bool align_dry = false;
+    align->add_option("media", align_media, "Media file (audio/video)")->required();
+    align->add_option("--ir", align_ir, "IR file with the transcript")->required();
+    align->add_option("--model", align_opts.model,
+                      "Aligner GGUF (qwen3-forced-aligner-0.6b-q4_k.gguf)");
+    align->add_option("--out,-o", align_out, "Output IR (default: <ir>.aligned.iris.json)");
+    align->add_option("--language", align_opts.language, "Language code (informational)")
+        ->capture_default_str();
+    align->add_option("--threads", align_opts.threads, "Inference threads (0 = auto)")
+        ->capture_default_str();
+    align->add_option("--pad", align_opts.pad_seconds, "Audio padding per sentence (default 0.2s)")
+        ->capture_default_str();
+    align->add_flag("--dry-run", align_dry, "Decode audio and report ranges only");
+
+    // ---- diff ----
+    auto* diff = app.add_subcommand("diff", "Compare an IR against a reference subtitle");
+    std::string diff_ir, diff_ref, diff_html;
+    double diff_min = 0.3;
+    bool diff_cjk = false;
+    diff->add_option("ir", diff_ir, "IR file (*.iris.json)")->required();
+    diff->add_option("--reference,-r", diff_ref, "Reference subtitle (.ass/.srt/.vtt)")
+        ->required();
+    diff->add_option("--html,-o", diff_html, "Output HTML report (default: <ir>.diff.html)");
+    diff->add_option("--min-overlap", diff_min, "Minimum time overlap ratio (default 0.3)")
+        ->capture_default_str();
+    diff->add_flag("--cjk-only", diff_cjk, "Only compare lines that contain Chinese");
+
+    // ---- karaoke ----
+    auto* karaoke = app.add_subcommand(
+        "karaoke", "Generate \\K timing: project a translation onto the source line's rhythm");
+    std::string karaoke_ir, karaoke_out;
+    bool karaoke_even = false;
+    bool karaoke_overwrite = false;
+    int karaoke_tol = 30;
+    karaoke->add_option("ir", karaoke_ir, "IR file (*.iris.json)")->required();
+    karaoke->add_option("--out,-o", karaoke_out, "Output IR (default: <ir>.karaoke.iris.json)");
+    karaoke->add_flag("--even", karaoke_even, "Even-split lines that have no timed source line");
+    karaoke->add_flag("--overwrite", karaoke_overwrite, "Recompute existing translatedRaw");
+    karaoke->add_option("--tolerance-ms", karaoke_tol,
+                        "Time tolerance for matching the timed line (default 30)")
+        ->capture_default_str();
+
+    // ---- style ----
+    auto* style = app.add_subcommand("style", "Style template tools");
+    auto* style_extract =
+        style->add_subcommand("extract", "Extract a style template from an ASS/SSA file");
+    std::string style_in, style_out, style_name;
+    style_extract->add_option("ass", style_in, "ASS/SSA file")->required();
+    style_extract->add_option("--out,-o", style_out,
+                              "Output template JSON (default: <ass>.theme.json)");
+    style_extract->add_option("--name", style_name, "Template name");
+
+    // ---- project ----
+    auto* project_cmd = app.add_subcommand("project", "Batch tools: scan a library, run the pipeline");
+    auto* p_scan = project_cmd->add_subcommand(
+        "scan", "Read-only inventory (events / karaoke coverage / issues)");
+    std::vector<std::string> scan_inputs;
+    std::string scan_html, scan_json;
+    bool scan_no_recursive = false;
+    p_scan->add_option("paths", scan_inputs, "Files or directories")->required();
+    p_scan->add_option("--html,-o", scan_html, "HTML dashboard");
+    p_scan->add_option("--json-out", scan_json, "JSON manifest");
+    p_scan->add_flag("--no-recursive", scan_no_recursive, "Do not recurse into subdirectories");
+
+    auto* p_run = project_cmd->add_subcommand(
+        "run", "Batch convert → rules → correct → karaoke → build → lint");
+    std::vector<std::string> proj_inputs;
+    iris::project::RunOptions proj_opts;
+    std::string proj_manifest, proj_html;
+    p_run->add_option("paths", proj_inputs, "Files or directories")->required();
+    p_run->add_option("--out-dir", proj_opts.out_dir, "Output directory (default: iris-out)")
+        ->capture_default_str();
+    p_run->add_option("--template,-t", proj_opts.template_path, "Style template (.json/.ass)");
+    p_run->add_option("--rules", proj_opts.rules_path, "Rule file");
+    p_run->add_option("--glossary", proj_opts.glossary_path, "Glossary");
+    p_run->add_flag("--even", proj_opts.fill_even, "Even-split lines without a rhythm source");
+    p_run->add_flag("--force", proj_opts.force, "Rebuild unchanged files");
+    p_run->add_option("--manifest", proj_manifest,
+                      "Manifest path (default: <out-dir>/manifest.json)");
+    p_run->add_option("--html", proj_html, "HTML report (default: <out-dir>/project.html)");
 
     // ---- init ----
     app.add_subcommand("init", "Interactive setup (stub, planned)");
@@ -394,7 +559,19 @@ int run(int argc, char** argv) {
                                    asr_punc ? resolve_punc_model(asr_punc_model) : std::string(),
                                    asr_split, asr_split_model);
     }
-    if (build->parsed()) return controller::run_build(build_ir, build_fmt, build_out);
+    if (build->parsed()) {
+        if (!build_shift.empty()) {
+            std::int64_t ms = 0;
+            if (!parse_shift_ms(build_shift, ms)) {
+                std::cerr << _("--shift format: +1:10:27.30 | -0:00:02.500 | +4227.3\n",
+                               "--shift 格式应为 +1:10:27.30 | -0:00:02.500 | +4227.3\n");
+                return 1;
+            }
+            build_opts.shift_ms = ms;
+        }
+        build_opts.crlf = !build_lf;
+        return controller::run_build(build_ir, build_fmt, build_out, build_opts);
+    }
     if (validate->parsed()) return controller::run_validate(v_ir);
     if (vsf->parsed()) {
         int rx=0, ry=0, rw=0, rh=0;
@@ -424,7 +601,28 @@ int run(int argc, char** argv) {
         }
         return controller::run_translate(translate_opts);
     }
-    if (correct->parsed()) return controller::run_correct(correct_ir, correct_out);
+    if (correct->parsed()) return controller::run_correct(correct_ir, correct_opts);
+    if (diff->parsed())
+        return controller::run_diff(diff_ir, diff_ref, diff_html, diff_min, diff_cjk);
+    if (align->parsed()) {
+        align_opts.dry_run = align_dry;
+        if (!align_dry && align_opts.model.empty()) {
+            std::cerr << _("align: --model is required (qwen3-forced-aligner-0.6b-q4_k.gguf)\n",
+                           "align: 需要 --model（qwen3-forced-aligner-0.6b-q4_k.gguf）\n");
+            return 1;
+        }
+        return controller::run_align(align_media, align_ir, align_out, align_opts);
+    }
+    if (p_scan->parsed()) {
+        iris::project::ScanOptions scan_opts;
+        scan_opts.recursive = !scan_no_recursive;
+        return controller::run_project_scan(scan_inputs, scan_opts, scan_html, scan_json);
+    }
+    if (p_run->parsed())
+        return controller::run_project_run(proj_inputs, proj_opts, proj_manifest, proj_html);
+    if (karaoke->parsed())
+        return controller::run_karaoke(karaoke_ir, karaoke_out, karaoke_even, karaoke_overwrite,
+                                       karaoke_tol);
     if (config_path_cmd->parsed()) {
         std::cout << model::active_config_path() << '\n';
         return 0;
@@ -448,13 +646,26 @@ int run(int argc, char** argv) {
         return controller::run_models_install(install_keys, cfg.models_dir, models_mirror, install_all,
                                               install_category, install_dry);
     if (quality->parsed()) return controller::run_quality(quality_ir, quality_out);
+    if (style_extract->parsed())
+        return controller::run_style_extract(style_in, style_out, style_name);
+    if (lint->parsed()) {
+        lint_opts.check_fonts = !lint_no_fonts;
+        return controller::run_lint(lint_inputs, lint_opts, lint_html);
+    }
     if (ocr->parsed()) {
         if (ocr_opts.model_dir == "models/ocr") ocr_opts.model_dir = cfg.resolve(cfg.ocr_model_dir);
         return controller::run_ocr(ocr_opts);
     }
     if (convert->parsed()) return controller::run_convert(convert_inputs, convert_lang, convert_out);
-    if (combine->parsed())
-        return controller::run_combine(combine_inputs, combine_lang, combine_out, combine_bilingual);
+    if (combine->parsed()) {
+        if (combine_text && !combine_bilingual) {
+            std::cerr << _("combine: --text requires --bilingual\n",
+                           "combine: --text 需要配合 --bilingual\n");
+            return 1;
+        }
+        return controller::run_combine(combine_inputs, combine_lang, combine_out, combine_bilingual,
+                                       combine_text);
+    }
     if (app.get_subcommand("doctor")->parsed()) return controller::run_doctor();
     if (app.get_subcommand("init")->parsed()) {
         std::cout << _("init: interactive setup coming soon\n", "init: 交互式设置将在后续版本实现\n");

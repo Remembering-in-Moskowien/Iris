@@ -58,8 +58,14 @@ add_library(iris_core
     src/text/punctuate.cpp
     src/text/cleanup.cpp
     src/text/sat.cpp
+    src/text/karaoke.cpp
+    src/text/karaoke_apply.cpp
+    src/text/rules.cpp
+    src/text/reference_diff.cpp
+    src/project/project.cpp
     src/ocr/rapid_ocr.cpp
     src/quality/report.cpp
+    src/quality/ass_lint.cpp
     src/catalog/models.cpp
     src/ui/console.cpp
     src/script/align.cpp
@@ -70,13 +76,17 @@ add_library(iris_core
     src/server/api.cpp
     src/subtitle/parser.cpp
     src/subtitle/combine.cpp
+    src/subtitle/ass_script.cpp
+    src/subtitle/ir_bridge.cpp
     src/asr/asr.cpp
+    src/asr/align.cpp
     src/asr/ct2_mel.cpp
     src/asr/onnx.cpp
     src/asr/onnx_funasr.cpp
     src/asr/diarize.cpp
     src/asr/separate.cpp
     src/view/subtitle_renderer.cpp
+    src/view/ass_builder.cpp
     src/infra/process.cpp
     src/infra/pipe_reader.cpp
     src/infra/i18n.cpp
@@ -137,6 +147,12 @@ add_executable(iris
     src/controller/subtitle_command.cpp
     src/controller/ocr_command.cpp
     src/controller/quality_command.cpp
+    src/controller/lint_command.cpp
+    src/controller/style_command.cpp
+    src/controller/karaoke_command.cpp
+    src/controller/diff_command.cpp
+    src/controller/align_command.cpp
+    src/controller/project_command.cpp
     src/controller/models_command.cpp
     src/controller/serve_command.cpp
     src/controller/script_command.cpp)

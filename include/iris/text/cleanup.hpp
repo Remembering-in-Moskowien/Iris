@@ -22,7 +22,10 @@ struct CleanupReport {
     int whitespace_fixed = 0; ///< 首尾空白/多余空白/汉字间空格
     int punctuation_fixed = 0;///< 重复标点、半角标点
     int timing_fixed = 0;     ///< 反序/零长度时间码
-    int overlap_fixed = 0;    ///< 与上一句重叠（裁掉重叠部分）
+    int overlap_fixed = 0;    ///< 与上一句重叠（裁掉重叠部分；歌词行豁免）
+    int overlap_kept = 0;     ///< 完全被前一句覆盖、为保行不删而保留重叠
+    int raw_synced = 0;       ///< 纯文本 raw 已同步
+    int raw_locked = 0;       ///< raw 含 \K 等标签，未回写
 };
 
 /// 清理单句文本：
@@ -38,7 +41,9 @@ std::string clean_text(const std::string& text, CleanupReport* report = nullptr)
 /// - 清空后为空的句子直接丢弃；
 /// - end <= start 的时间码修正为 start + 1ms；
 /// - 与上一句重叠时将本句起点推到上一句结束（若因此变为零长度则丢弃）。
-void clean_sentences(std::vector<model::Sentence>& sentences, CleanupReport& report);
+/// lyric_track=true（或句子带 \K / 像歌词行）时保留叠行，不消重叠。
+void clean_sentences(std::vector<model::Sentence>& sentences, CleanupReport& report,
+                     bool lyric_track = false);
 
 /// 对整个 IR 文档的所有轨道执行校正。
 CleanupReport correct_document(model::IrDocument& doc);

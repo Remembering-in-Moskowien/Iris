@@ -72,6 +72,15 @@ std::vector<ModelEntry> build() {
                    "tokens.txt"}},
                  mb(217), "paraformer-onnx", "中文专用；输出无标点，建议配 --punc"});
 
+    // ---------------- 强制对齐 ----------------
+    v.push_back({"qwen3-forced-aligner", "align", "Qwen3-ForcedAligner 0.6B（GGUF q4_k）", "aligner",
+                 {{std::string(kHf) +
+                       "cstr/qwen3-forced-aligner-0.6b-GGUF/resolve/main/"
+                       "qwen3-forced-aligner-0.6b-q4_k.gguf",
+                   "qwen3-forced-aligner-0.6b-q4_k.gguf"}},
+                 mb(500), "align",
+                 "词级/字级时间戳（Qwen3-ASR 架构）；给 karaoke 提供 words"});
+
     // ---------------- TTS ----------------
     v.push_back({"qwen3-tts-0.6b", "tts", "Qwen3-TTS 0.6B（ggml q8_0）+ 12 Hz tokenizer", "qwen3-tts",
                  {{std::string(kHf) +

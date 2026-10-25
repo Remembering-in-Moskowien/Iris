@@ -248,7 +248,7 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | 命令 | 用途 | 状态 |
 |---|---|---|
 | `asr` | 媒体 → IR（ffmpeg 转换 → 预处理 → 进程内 ASR 推理 → 分句；`--separate` 分人声、`--punc` 补标点、`--diarize` 分说话人、`--split sat` 语义分句） | ✅ 已迁移 |
-| `build` | IR → ASS / SRT / TXT | ✅ 已迁移 |
+| `build` | IR → ASS / SRT / TXT（`--template` 套样式、`--bilingual` 双语、`--shift` 偏移、`--scale` 4K） | ✅ 已迁移 |
 | `validate` | IR 结构校验 | ✅ 已迁移 |
 | `doctor` | 环境诊断（ffmpeg / ASR / TTS 后端 / 配置） | ✅ 已迁移 |
 | `serve` | REST API：`POST /jobs` 提交子命令、`GET /jobs/{id}` 查状态与产物（异步子进程） | ✅ 已迁移 |
@@ -261,6 +261,12 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | `serve` | REST API：`POST /jobs` 提交子命令、`GET /jobs/{id}` 查状态与产物（异步子进程） | ✅ 已迁移 |
 | `models` | 模型注册表：`models list` 看安装状态，`models install [keys] [--all] [--category x]` 一键下载（支持 `--mirror`/`IRIS_HF_MIRROR`） | ✅ 已迁移 |
 | `quality` | 字幕质量报告（CPS/重叠/空白/重复/说话人，输出自包含 HTML；有 error 时 exit 2） | ✅ 已迁移 |
+| `lint` | ASS/SSA 只读体检（未定义样式、字体、`\K`、语速、重叠、歌词待补段）→ HTML 报告 | ✅ 新增 |
+| `style extract` | 从成品 ASS 反推样式模板 JSON（给 `build --template` 用） | ✅ 新增 |
+| `karaoke` | 生成 `\K`：同码投影 / 译文投影 / 词级时间 / 均分 | ✅ 新增 |
+| `diff` | 与参考字幕对读（漏句 / 多句 / 文本差异） | ✅ 新增 |
+| `align` | 强制对齐（Qwen3-ForcedAligner）：给 IR 写词级/字级时间 | ✅ 新增 |
+| `project` | 批量台账 / 批量流水线（`scan` / `run`，增量） | ✅ 新增 |
 | `ocr` | 视频硬字幕 → IR（vsf 找字幕段 + PP-OCRv5 检测/识别） | ✅ 已迁移 |
 | `convert` / `combine` | 字幕文件（SRT/ASS/VTT）→ IR；`combine --bilingual` 做双语对齐 | ✅ 已迁移 |
 | `from-script` | 纯文本剧本 → 带时间码的 IR（转写做锚点 + NW 全局对齐 + 未匹配行按字符数插值；支持行首说话人标签） | ✅ 已迁移 |
@@ -270,6 +276,146 @@ powershell -ExecutionPolicy Bypass -File scripts/verify-translate.ps1 -Ir out.ir
 | `serve` | REST API | 🚧 待迁移 |
 
 ---
+
+## 字幕文件体检（`lint`）
+
+对**已经生成的成品**做只读体检：不改写任何文件，直接跑在 Aegisub 产物上。
+
+```bash
+# 目录会递归扫描 .ass/.ssa；--fonts 可重复，用来核对字体是否随包
+build/bin/iris lint D:\SubtitleProjectArchives\Backups \
+    --fonts D:\SubtitleProjectArchives\Misics -o lint.html
+```
+
+检查项（码见报告）：
+
+- `style-undefined` / `font-missing`：事件引用了不存在的样式；样式字体不在字体目录
+  （按“字体名 ↔ 文件名”规范化匹配，可能误报）；
+- `lang-style-mismatch`：`chi` 轨里是英文、`eng` 轨里是中文；
+- `karaoke-under` / `karaoke-over`：`\K` 之和与行时长不符（留白 / 溢出）；
+- `cps-high` / `line-long`：语速与行长超阈值（中文 8 字/秒、20 字；英文 25 字符/秒）；
+- `overlap`：同语言轨道时间重叠；带 `\K` 的歌词行豁免，`chi`/`eng` 双语同码也不算；
+- `duplicate` / `empty-text` / `bad-time` / `wrapstyle-typo`：相邻重复、空行、坏时码、拼写；
+- `lyric-candidate`：**歌词候选段**——长时长（≥3.2 s）+ 低语速（≤3 字/秒）的连续中文行，
+  标出时间范围与首行；没有 `\K` 的段就是“待补歌词”清单（`song-styles-unused` 标出
+  “定义了角色样式但整片没有 `\K`”的文件）。
+
+参数：`--zh-cps`、`--en-cps`、`--max-cjk`、`--max-issues` 调阈值；`--no-fonts` 关字体检查；
+`--json` 输出逐文件摘要与 `lyricSamples`；有 `error` 时退出码 2，适合挂 CI。
+
+## 成品渲染（`build`）
+
+```bash
+# 从成品反推模板（Script Info + 全部样式）
+build/bin/iris style extract 中文字幕.ass -o rr.theme.json
+
+# 双语成品：译文 + 原文各一条、同一条时间码；chi 在前、eng 在后
+build/bin/iris build out.zh.iris.json --bilingual --template rr.theme.json \
+    --shift +1:10:27.30 -o out.bilingual.ass
+```
+
+- **样式来源**：`--template`（`.json`，或直接给一份 `.ass`/`.ssa` 现场反推）→ IR 自带样式
+  （`convert` 过的成品可原样回写）→ 内置 1080p 模板（chi 底部 28 / eng 对白 100 / eng 歌词 880）；
+- **双语**：每句拆成「译文 + 原文」两条事件。样式按 `chi-X ↔ eng-X` 自动配对，排序按语言
+  rank（中文在前）；原文保留 IR 的 `raw`，所以 `{\K...}`、`\N`、`\h` 等标签原样带出；
+- **分行不一致的译文**：两份字幕分行不同时（例如译文是一行一条的纯文本/ASS 片段），用
+  `combine --bilingual --text 译文.txt` 按**行序**配对；多出来且自带时间码的行会作为独立
+  译文事件补进来，不会再因为按时间硬配而整体错位；
+- **时间**：`--shift +1:10:27.30`（也接受 `+4227.3` 秒、`-0:00:02.500`），叠加 IR 的
+  `state.timelineOffsetMs`；`--scale 2` 把画布/字号/边距一起放大到 4K；
+- **编码**：默认 CRLF + UTF-8 无 BOM（Aegisub 友好），`--lf` / `--bom` 可改；
+- **保真**：`convert` 保留样式、原始标签、层、Comment、actor；ASS→IR→ASS 在 255 部成品上
+  逐事件比对为 0 差异（未定义样式会按文本语言回退到 chi/eng，并在 stderr 提示）。
+
+> IR 1.0 的加法字段：`state.styles` / `state.scriptInfo` / `state.timelineOffsetMs`、
+> `sentence.style` / `raw` / `translatedRaw` / `layer` / `comment`、`track.kind`。
+> 旧 IR 缺省即兼容。
+
+## 卡拉 OK 打轴（`karaoke`）
+
+```bash
+# 中英双语是两条同码事件、英文已有逐词 \K、中文还没有
+iris convert 中文字幕.ass -o wip.iris.json
+iris karaoke wip.iris.json -o wip.k.iris.json
+iris build wip.k.iris.json -o wip.k.ass
+```
+
+三种打轴来源（按顺序尝试）：
+
+- **词级时间**：IR 里有 `words`（音频强制对齐的产物）时，按词起点生成 `\K`，词间空隙成为停顿；
+- **同码投影**：同一文件里时间码相同的另一条事件带 `\K` 时，按源词的**音节数**把本行文字分配到
+  各词（`Once`→1 字、`upon`→2 字），词内再切分，词的时长原样保留——长音节对应长字，
+  短词不会被摊平到相邻词里（译文与原文共用时间轴时最常用）；
+- **译文投影**：一句话里既有原文 `raw`（带 `\K`）又有 `translatedText` 时，生成 `translatedRaw`，
+  `build --bilingual` 直接用它，不必把译文拆成独立事件；
+- 兜底 `--even`：完全没有节奏参照时按 token 均分（只是占位网格，仍需人工）。
+
+所有模式都保证 **Σ`\K` = 行时长**（百分秒取整），句首引导与句尾留白照搬源行；
+`--overwrite` 重算已有 `translatedRaw`，`--tolerance-ms` 调同码匹配容差。
+
+> 音频强制对齐（`align`）还没接：它需要 CrispASR 的 wav2vec2 对齐模型，
+> 接上后写 `words`，`karaoke` 会自动走“词级时间”这条路。
+
+## 文本规则与参考对读（`correct --rules` / `diff`）
+
+```bash
+# 规则 + 术语表（先预演，确认后再写回）
+iris correct out.iris.json --rules docs/rules/mlp.rules \
+    --glossary docs/rules/glossary.tsv --dry-run
+
+# 与参考字幕对读
+iris diff out.iris.json --reference 岸字幕组.ass --cjk-only -o diff.html
+```
+
+- **规则文件**：每行 `pattern => replacement`，ECMAScript 正则、`$1` 反向引用；
+  也支持内置宏 `@trim`、`@collapse-spaces`、`@drop-brackets`、`@drop-speaker-prefix`、
+  `@drop-music-note`、`@space-before-punct`、`@space-after-punct`、`@ellipsis-space`。
+  **不支持 lookbehind**，用 lookahead 改写（见 `docs/rules/mlp.rules`，从旧 To-do List 迁过来）。
+- **术语表**：`from<TAB>to`，大小写不敏感；只作用于含中文的行，避免把英文台词里的
+  `Celestia` 替换成中文。
+- **安全**：规则在清理之前跑（行首 `Speaker:` 还是 ASCII 冒号，不会切坏 UTF-8）；
+  改动会同步回纯文本 `raw`；带 `\K` 的行标记为 `raw locked`，不会被破坏。
+- **叠行保护**：`correct` 不再拆歌词行——带 `\K`、`lyric` 轨道、或「≥3 s 且 ≤4 字/秒」的行
+  都保留叠行；`chi`/`eng` 同码双语对也不会被当成重叠。
+- **`diff`**：按时间窗 + 字符级 LCS 相似度对读，报「参考有我们缺 / 我们有参考缺 / 长度异常」；
+  有漏句时退出码 2；`--cjk-only` 只比中文行；IR 里有译文时自动用译文比对。
+
+## 强制对齐（`align`，Qwen3-ForcedAligner）
+
+```bash
+iris models install qwen3-forced-aligner        # 500 MB（Q4_K，HF 或镜像）
+iris align 视频.mkv --ir out.iris.json \
+    --model models/aligner/qwen3-forced-aligner-0.6b-q4_k.gguf \
+    -o out.aligned.iris.json
+iris karaoke out.aligned.iris.json -o out.k.iris.json
+```
+
+- 逐句把 `[start-pad, end+pad]`（默认 0.2 s）的音频送进对齐器；对齐器上下文在运行库内按
+  模型路径缓存，逐句调用不会反复加载模型；
+- 输出 `Sentence.words`（中文按字、英文按词）；`karaoke` 自动走「词级时间」这条路生成 `\K`；
+- `--dry-run` 只解码音频并统计可对齐句子数，不需要模型；
+- 模型文件名含 `forced-aligner` / `qwen3-fa` / `qwen3-forced` 时路由到 Qwen3-FA，其余按
+  canary-ctc / wav2vec2 对齐器处理；
+- 依赖 CrispASR 运行时（Windows 发布包自带）；模型不随包发布。
+
+## 批量项目（`project`）
+
+```bash
+# 只读台账：每个文件的完成度 / 歌词覆盖 / 待补段 / 错误
+iris project scan 作品目录 --html ledger.html --json-out ledger.json
+
+# 批量流水线：convert → 规则/术语 → correct → karaoke → build → lint
+iris project run 作品目录 --out-dir iris-out \
+    --rules docs/rules/mlp.rules --glossary docs/rules/glossary.tsv
+```
+
+- `scan` 只读，状态 = `ok` / `needs-karaoke`（有歌词候选段没打轴）/ `error`（lint 有错）/
+  `failed`（解析失败）；
+- `run` 每个文件产出 `<out-dir>/<名字>.ass` + `.iris.json`，并对**产物**再跑一次 lint；
+  台账写 `manifest.json`，HTML 写 `project.html`；
+- **增量**：manifest 记录源文件大小与 mtime，未变化且产物存在就跳过（`--force` 强制重跑）；
+- **不丢行**：空行（带原文）保留；完全被前一句覆盖时保留重叠而不删行；歌词叠行与未知样式
+  （`Default`/`Default-L2`）不参与消重叠。255 部成品跑一遍，逐文件行数比对 **0 差异**。
 
 ## 架构
 

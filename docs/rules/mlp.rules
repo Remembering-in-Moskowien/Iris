@@ -1,0 +1,23 @@
+# iris correct --rules docs/rules/mlp.rules --glossary docs/rules/glossary.tsv
+#
+# 每行：`pattern => replacement`
+#   - ECMAScript 正则，支持 $1 反向引用与 lookahead (?=...)；
+#   - **不支持 lookbehind (?<=...)**：用宏里的 lookahead 写法代替；
+#   - 以 @ 开头的行可以只写宏名（替换文本由宏定义）；
+#   - `#` 开头为注释。
+#
+# 对应旧 To-do List 的 PRE/PRO 文本规则；ASS 文件级的 Default→chi、WarpStyle→WrapStyle
+# 由 build --template / lint 负责，不在这里。
+
+@space-before-punct
+@space-after-punct
+@ellipsis-space
+@drop-brackets
+@drop-speaker-prefix
+@drop-music-note
+@collapse-spaces
+@trim
+
+# 项目自定规则示例（按需打开）：
+# 英文单词两侧的多余空格压成一个（@collapse-spaces 已覆盖）
+# \s+=>  

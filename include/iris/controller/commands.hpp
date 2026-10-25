@@ -5,6 +5,10 @@
 
 #include "iris/asr/diarize.hpp"
 #include "iris/asr/separate.hpp"
+#include "iris/asr/align.hpp"
+#include "iris/project/project.hpp"
+#include "iris/quality/ass_lint.hpp"
+#include "iris/view/ass_builder.hpp"
 
 namespace iris::controller {
 
@@ -27,8 +31,9 @@ int run_asr(const std::string& input, const std::string& language, const std::st
             const std::string& punc_model = {},
             const std::string& split_strategy = "rule", const std::string& split_model = {});
 
-/// build：IR → ASS/SRT/TXT（View 层渲染）。
-int run_build(const std::string& ir_path, const std::string& format, const std::string& output);
+/// build：IR → ASS/SRT/TXT（View 层渲染）。template/bilingual/shift 只影响 ASS。
+int run_build(const std::string& ir_path, const std::string& format, const std::string& output,
+              const view::AssBuildOptions& options);
 
 /// validate：校验 IR 文件。
 int run_validate(const std::string& ir_path);
@@ -147,6 +152,19 @@ int run_models_install(const std::vector<std::string>& keys, const std::string& 
 /// quality：统计 IR 的字幕质量指标并渲染 HTML 报告（有 error 时返回 2）。
 int run_quality(const std::string& ir_path, const std::string& out_html);
 
+/// lint：只读体检 ASS/SSA（样式、\K、语速、重叠、字体、歌词候选段），产出 HTML 报告。
+/// 不改写任何字幕文件；有 error 时返回 2。
+int run_lint(const std::vector<std::string>& inputs, const quality::LintOptions& options,
+             const std::string& out_html);
+
+/// style extract：从成品 ASS 反推样式模板 JSON（供 build --template 使用）。
+int run_style_extract(const std::string& ass_path, const std::string& out_json,
+                      const std::string& name);
+
+/// karaoke：按源行 \K 节奏投影译文（或同码兄弟行），生成逐字 \K。
+int run_karaoke(const std::string& ir_path, const std::string& out_path, bool fill_even,
+                bool overwrite, int tolerance_ms);
+
 /// ocr：从视频硬字幕提取文本 → IR（vsf 找字幕段 + PP-OCR 识别）。
 int run_ocr(const OcrCommandOptions& options);
 
@@ -155,11 +173,35 @@ int run_convert(const std::vector<std::string>& inputs, const std::string& langu
                 const std::string& out_path);
 
 /// combine：多个字幕文件 → IR（同一语言拼接去重；--bilingual 时第二份作为译文对齐）。
+/// text_mode=true 时第二份按「纯文本，一行一条」处理，并按行序配对（不做时间重叠匹配）。
 int run_combine(const std::vector<std::string>& inputs, const std::string& language,
-                const std::string& out_path, bool bilingual);
+                const std::string& out_path, bool bilingual, bool text_mode = false);
 
-/// correct：IR 文本/时间码校正（空白、标点、空句、反序与重叠时间码）。
-int run_correct(const std::string& ir_path, const std::string& out_path);
+/// correct：IR 文本/时间码校正（空白、标点、空句、反序与重叠时间码、规则、术语）。
+struct CorrectCommandOptions {
+    std::string out_path;
+    std::string rules_path;    ///< 规则文件（可空）
+    std::string glossary_path; ///< 术语表（可空）
+    bool dry_run = false;      ///< 只打印改动，不写文件
+    int samples = 10;          ///< 打印的改动样例数
+};
+int run_correct(const std::string& ir_path, const CorrectCommandOptions& options);
+
+/// diff：把 IR 与参考字幕按时间重叠对读，找漏句/多句/长度异常。
+int run_diff(const std::string& ir_path, const std::string& reference_path,
+             const std::string& out_html, double min_overlap, bool cjk_only = false);
+
+/// align：强制对齐（Qwen3-ForcedAligner / CTC），把词级时间写进 IR。
+int run_align(const std::string& media, const std::string& ir_path, const std::string& out_path,
+              const asr::AlignOptions& options);
+
+/// project scan：只读台账（事件 / 歌词覆盖 / 待补 / 错误）。
+int run_project_scan(const std::vector<std::string>& inputs, const project::ScanOptions& options,
+                     const std::string& out_html, const std::string& out_json);
+
+/// project run：批量 convert→规则→correct→karaoke→build→lint（可增量）。
+int run_project_run(const std::vector<std::string>& inputs, const project::RunOptions& options,
+                    const std::string& manifest_path, const std::string& out_html);
 
 /// emotion：语音情感分析（A/D/V 三维，Wav2Small ONNX）。
 int run_emotion(const std::string& onnx_path, const std::string& wav_path);

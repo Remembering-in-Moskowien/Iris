@@ -1,7 +1,11 @@
 #include "iris/text/cleanup.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
+#include <map>
+
+#include "iris/text/karaoke.hpp"
 
 namespace iris::text {
 
@@ -110,7 +114,8 @@ std::string clean_text(const std::string& text, CleanupReport* report) {
                 pending_punct.clear();
             }
             if (!collapsed.empty() && collapsed.back() == c &&
-                std::string(".!?,;:").find(c) != std::string::npos) {
+                std::string("!?,;:").find(c) != std::string::npos) {
+                // 不合并 '.'：连续的 "..." 是省略号，不能压成一个点。
                 ++rep.punctuation_fixed;
                 ++i;
                 continue;
@@ -153,31 +158,74 @@ std::string clean_text(const std::string& text, CleanupReport* report) {
     return result;
 }
 
-void clean_sentences(std::vector<model::Sentence>& sentences, CleanupReport& report) {
+void clean_sentences(std::vector<model::Sentence>& sentences, CleanupReport& report,
+                     bool lyric_track) {
     std::vector<model::Sentence> out;
     out.reserve(sentences.size());
-    std::int64_t prev_end = -1;
+    // 按「样式」分别维护上一句结束：chi / eng 同码是双语对，Default / Default-L2 也是；
+    // 用样式名而不是语言分类，避免未知样式（Default 系列）互相消重叠。
+    std::map<std::string, std::int64_t> last_end_by_style;
 
     for (auto& s : sentences) {
         ++report.sentences_in;
+        const std::string before = s.text;
         s.text = clean_text(s.text, &report);
+        if (s.text != before && s.raw) {
+            if (s.raw->find('{') == std::string::npos) {
+                std::string escaped;
+                escaped.reserve(s.text.size() + 8);
+                for (char c : s.text) {
+                    if (c == '{' || c == '}') escaped.push_back('\\');
+                    escaped.push_back(c);
+                }
+                *s.raw = std::move(escaped);
+                ++report.raw_synced;
+            } else {
+                ++report.raw_locked;
+            }
+        }
         if (s.text.empty()) {
-            ++report.dropped;
-            continue;
+            // 空行但来自成品（有 raw）：保留，保证行数不变；ASR 的空句才丢。
+            if (!s.raw) {
+                ++report.dropped;
+                continue;
+            }
         }
         if (s.end_ms <= s.start_ms) {
             s.end_ms = s.start_ms + 1;
             ++report.timing_fixed;
         }
-        if (prev_end >= 0 && s.start_ms < prev_end) {
-            s.start_ms = prev_end;
-            ++report.overlap_fixed;
-            if (s.end_ms <= s.start_ms) {
-                ++report.dropped;
-                continue;
+        // 歌词行允许叠行（滚动双行卡拉 OK），不能按对白的方式消重叠。
+        // 除了 \K 与 lyric 轨道，也按「长时长 + 低语速」识别还没打轴的歌词行。
+        bool lyric = lyric_track || (s.raw && text::has_karaoke(*s.raw));
+        if (!lyric) {
+            const std::int64_t dur = s.end_ms - s.start_ms;
+            int chars = 0;
+            for (std::size_t i = 0; i < s.text.size();) {
+                const auto b = static_cast<unsigned char>(s.text[i]);
+                std::size_t len = 1;
+                if ((b & 0xE0) == 0xC0) len = 2;
+                else if ((b & 0xF0) == 0xE0) len = 3;
+                else if ((b & 0xF8) == 0xF0) len = 4;
+                if (!std::isspace(b)) ++chars;
+                i += len;
+            }
+            const double cps = dur > 0 ? static_cast<double>(chars) * 1000.0 / dur : 99.0;
+            lyric = dur >= 3000 && cps <= 4.0;
+        }
+        const std::string key = s.style.value_or("");
+        std::int64_t& last_end = last_end_by_style[key];
+        if (!lyric && last_end > 0 && s.start_ms < last_end) {
+            if (s.end_ms - last_end >= 1) {
+                s.start_ms = last_end;
+                ++report.overlap_fixed;
+            } else {
+                // 整句被前一句盖住：宁可保留重叠，也不删行。
+                ++report.overlap_kept;
             }
         }
-        prev_end = s.end_ms;
+        // 歌词行是滚动叠行，不能作为后续对白的「上一句结束」。
+        if (!lyric) last_end = std::max(last_end, s.end_ms);
         out.push_back(std::move(s));
     }
     sentences = std::move(out);
@@ -186,7 +234,7 @@ void clean_sentences(std::vector<model::Sentence>& sentences, CleanupReport& rep
 CleanupReport correct_document(model::IrDocument& doc) {
     CleanupReport report;
     for (auto& track : doc.state.tracks) {
-        clean_sentences(track.sentences, report);
+        clean_sentences(track.sentences, report, track.kind == "lyric");
     }
     return report;
 }

@@ -37,11 +37,13 @@ std::wstring build_command_line(const std::vector<std::string>& args) {
     for (const auto& a : args) {
         if (cmd.tellp() != std::streampos(0)) cmd << L' ';
         cmd << L'"';
-        for (const char c : a) {
-            if (c == '"') {
+        // 必须整串 UTF-8 → UTF-16；按字节强转会把中文路径变成 Latin-1 乱码。
+        const std::wstring wide = to_wide(a);
+        for (const wchar_t c : wide) {
+            if (c == L'"') {
                 cmd << L"\\\"";
             } else {
-                cmd << static_cast<wchar_t>(static_cast<unsigned char>(c));
+                cmd << c;
             }
         }
         cmd << L'"';

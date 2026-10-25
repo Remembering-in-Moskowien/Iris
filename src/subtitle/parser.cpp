@@ -8,13 +8,15 @@
 #include <fstream>
 #include <sstream>
 
+#include "iris/infra/paths.hpp"
+
 namespace iris::subtitle {
 
 namespace {
 
 /// 读整个文件（保留 UTF-8；去掉 BOM）。
 bool read_all(const std::string& path, std::string& out, std::string& error) {
-    std::ifstream f(path, std::ios::binary);
+    std::ifstream f(infra::utf8_path(path), std::ios::binary);
     if (!f) {
         error = "无法打开字幕文件：" + path;
         return false;

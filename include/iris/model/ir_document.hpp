@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "iris/subtitle/ass_script.hpp"
+
 namespace iris::model {
 
 // ---------------------------------------------------------------------------
@@ -62,6 +64,12 @@ struct Sentence {
     std::optional<std::string> translated_text;
     std::optional<std::string> speaker;
     std::vector<Word> words;
+    // ---- 成品信息（IR 1.0 的加法扩展；旧文件缺省为空） ----
+    std::optional<std::string> style; ///< ASS 样式名（如 chi / eng-Twilight）
+    std::optional<std::string> raw;   ///< 原始 ASS 文本（含 {\K..} 等覆盖标签）
+    std::optional<std::string> translated_raw; ///< 译文行的 ASS 文本（含 \K）
+    int layer = 0;                    ///< ASS 层
+    bool comment = false;             ///< Comment 行
 
     /// 序列化为 nlohmann::json。
     [[nodiscard]] nlohmann::json to_json() const;
@@ -72,6 +80,7 @@ struct Sentence {
 struct Track {
     std::string type; ///< "transcribe" | "translation" | "script" | ...
     std::string language;
+    std::string kind = "dialogue"; ///< dialogue | lyric
     std::vector<Sentence> sentences;
 
     /// 序列化为 nlohmann::json。
@@ -108,6 +117,11 @@ struct WorkflowState {
     std::optional<std::string> vocals_path;
     std::optional<std::string> dubbed_audio_path; ///< dub 链路的配音音轨（WAV）
     std::vector<Track> tracks;
+
+    // ---- 成品信息（IR 1.0 的加法扩展） ----
+    std::vector<subtitle::AssStyle> styles;                          ///< 样式表
+    std::vector<std::pair<std::string, std::string>> script_info;    ///< [Script Info] 顺序键值
+    std::int64_t timeline_offset_ms = 0;                             ///< 整片偏移（渲染时叠加）
 
     bool is_audio_converted = false;
     bool is_vocals_separated = false;

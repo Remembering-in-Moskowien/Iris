@@ -31,4 +31,14 @@ std::string executable_dir() {
     return p.has_parent_path() ? p.parent_path().string() : std::string(".");
 }
 
+std::filesystem::path utf8_path(const std::string& utf8) {
+    return std::filesystem::path(
+        std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size()));
+}
+
+std::string path_to_utf8(const std::filesystem::path& path) {
+    const auto u8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+}
+
 } // namespace iris::infra
