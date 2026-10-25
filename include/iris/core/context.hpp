@@ -12,6 +12,7 @@ namespace iris::core {
 struct PipelineContext {
     model::IrDocument* doc = nullptr;
     std::string work_dir; ///< 本次运行专属临时目录
+    std::string subtitle_path; ///< 最近一次 build 操作生成的字幕文件
     std::function<void(const std::string& stage, float progress)> on_progress;
 
     /// 记录一条溯源（operator + model）。

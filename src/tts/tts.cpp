@@ -5,8 +5,11 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <thread>
+#include <utility>
 
+#include "iris/core/extension_registry.hpp"
 #include "iris/infra/process.hpp"
 #include "iris/infra/threads.hpp"
 #include "iris/tts/qwen3_session.hpp"
@@ -17,8 +20,100 @@ namespace iris::tts {
 
 namespace {
 
-constexpr const char* kEngineQwen3 = "qwen3-tts";
-constexpr const char* kEngineIndexTts = "indextts";
+class TtsBackendSession {
+public:
+    virtual ~TtsBackendSession() = default;
+    virtual bool open(const TtsRequest& request, std::string& error) = 0;
+    virtual bool synthesize(const std::string& text, TtsResult& out,
+                            std::string& error) = 0;
+    [[nodiscard]] virtual bool is_open() const = 0;
+};
+
+class Qwen3BackendSession final : public TtsBackendSession {
+public:
+    bool open(const TtsRequest& request, std::string& error) override {
+        return qwen3_open(request, session_, error);
+    }
+
+    bool synthesize(const std::string& text, TtsResult& out,
+                    std::string& error) override {
+        return qwen3_synthesize(session_, text, out, error);
+    }
+
+    [[nodiscard]] bool is_open() const override { return session_.session != nullptr; }
+
+private:
+    Qwen3Session session_;
+};
+
+class IndexTtsBackendSession final : public TtsBackendSession {
+public:
+    bool open(const TtsRequest& request, std::string&) override {
+        request_ = request;
+        return true;
+    }
+
+    bool synthesize(const std::string& text, TtsResult& out,
+                    std::string& error) override {
+        TtsRequest request = request_;
+        request.text = text;
+        return synth_indextts(request, out, error);
+    }
+
+    [[nodiscard]] bool is_open() const override { return false; }
+
+private:
+    TtsRequest request_;
+};
+
+std::unique_ptr<TtsBackendSession> make_qwen3_session() {
+    return std::make_unique<Qwen3BackendSession>();
+}
+
+std::unique_ptr<TtsBackendSession> make_indextts_session() {
+    return std::make_unique<IndexTtsBackendSession>();
+}
+
+struct TtsBackendRegistration {
+    TtsEngine engine;
+    bool available;
+    bool (*synthesize)(const TtsRequest&, TtsResult&, std::string&);
+    std::unique_ptr<TtsBackendSession> (*create_session)();
+};
+
+const core::ExtensionRegistry<TtsBackendRegistration>& tts_backends() {
+    static const auto registry = [] {
+        core::ExtensionRegistry<TtsBackendRegistration> result;
+        const auto add = [&](std::string id, std::vector<std::string> aliases,
+                             TtsEngine engine, bool available,
+                             bool (*synthesize)(const TtsRequest&, TtsResult&,
+                                                std::string&),
+                             std::unique_ptr<TtsBackendSession> (*create_session)()) {
+            std::string error;
+            if (!result.register_extension(std::move(id), std::move(aliases),
+                                           {engine, available, synthesize, create_session},
+                                           error)) {
+                throw std::logic_error("invalid built-in TTS registration: " + error);
+            }
+        };
+        add("qwen3-tts", {"qwen3tts", "qwen3"}, TtsEngine::Qwen3Tts,
+            IRIS_HAS_CRISPASR != 0, synth_qwen3_tts, make_qwen3_session);
+        add("indextts", {"index-tts"}, TtsEngine::IndexTts, IRIS_HAS_ONNX != 0,
+            synth_indextts, make_indextts_session);
+        return result;
+    }();
+    return registry;
+}
+
+const core::ExtensionRegistry<TtsBackendRegistration>::Entry*
+find_tts_backend(TtsEngine engine) {
+    const auto& entries = tts_backends().entries();
+    const auto it = std::find_if(entries.begin(), entries.end(),
+                                 [&](const auto& entry) {
+                                     return entry.extension.engine == engine;
+                                 });
+    return it == entries.end() ? nullptr : &*it;
+}
 
 // WAV 头是 little-endian，读取时按字节拼装，不依赖宿主字节序。
 std::uint32_t le32(const char* p) {
@@ -50,31 +145,29 @@ void put16(std::ostream& os, std::uint16_t v) {
 // 引擎注册
 // ---------------------------------------------------------------------------
 bool parse_tts_engine(const std::string& name, TtsEngine& out) {
-    if (name == kEngineQwen3 || name == "qwen3tts" || name == "qwen3") {
-        out = TtsEngine::Qwen3Tts;
-        return true;
-    }
-    if (name == kEngineIndexTts || name == "index-tts") {
-        out = TtsEngine::IndexTts;
-        return true;
-    }
-    return false;
+    const auto* entry = tts_backends().find(name);
+    if (!entry) return false;
+    out = entry->extension.engine;
+    return true;
 }
 
 const char* tts_engine_name(TtsEngine engine) {
-    switch (engine) {
-        case TtsEngine::Qwen3Tts: return kEngineQwen3;
-        case TtsEngine::IndexTts: return kEngineIndexTts;
-    }
-    return "unknown";
+    const auto* entry = find_tts_backend(engine);
+    return entry ? entry->id.c_str() : "unknown";
 }
 
 bool tts_engine_available(TtsEngine engine) {
-    switch (engine) {
-        case TtsEngine::Qwen3Tts: return IRIS_HAS_CRISPASR != 0;
-        case TtsEngine::IndexTts: return IRIS_HAS_ONNX != 0;
+    const auto* entry = find_tts_backend(engine);
+    return entry != nullptr && entry->extension.available;
+}
+
+std::vector<TtsEngineInfo> registered_tts_engines() {
+    std::vector<TtsEngineInfo> out;
+    for (const auto& entry : tts_backends().entries()) {
+        out.push_back({entry.id, entry.aliases, entry.extension.engine,
+                       entry.extension.available});
     }
-    return false;
+    return out;
 }
 
 // 供各引擎实现复用的线程数解析。
@@ -85,7 +178,7 @@ int resolve_tts_threads(int requested) { return infra::resolve_threads(requested
 // ---------------------------------------------------------------------------
 struct TtsSession::Impl {
     TtsRequest req;
-    std::unique_ptr<Qwen3Session> qwen; ///< 仅 qwen3-tts 有可复用会话
+    std::unique_ptr<TtsBackendSession> backend;
 };
 
 TtsSession::TtsSession() : impl_(std::make_unique<Impl>()) {}
@@ -93,19 +186,26 @@ TtsSession::~TtsSession() = default;
 
 bool TtsSession::open(const TtsRequest& req, std::string& error) {
     impl_->req = req;
-    impl_->qwen.reset();
+    impl_->backend.reset();
 
     if (!tts_engine_available(req.engine)) {
         error = std::string("tts: 引擎 '") + tts_engine_name(req.engine) +
                 "' 的推理运行时未随本次构建提供";
         return false;
     }
-    if (req.engine == TtsEngine::Qwen3Tts) {
-        impl_->qwen = std::make_unique<Qwen3Session>();
-        if (!qwen3_open(req, *impl_->qwen, error)) {
-            impl_->qwen.reset();
-            return false;
-        }
+    const auto* entry = find_tts_backend(req.engine);
+    if (!entry) {
+        error = "tts: 未知引擎";
+        return false;
+    }
+    impl_->backend = entry->extension.create_session();
+    if (!impl_->backend) {
+        error = std::string("tts: 无法创建引擎会话 '") + entry->id + "'";
+        return false;
+    }
+    if (!impl_->backend->open(req, error)) {
+        impl_->backend.reset();
+        return false;
     }
     return true;
 }
@@ -116,15 +216,17 @@ bool TtsSession::synthesize(const std::string& text, TtsResult& out, std::string
         error = "tts: 待合成文本为空";
         return false;
     }
-    if (impl_->qwen) return qwen3_synthesize(*impl_->qwen, text, out, error);
+    if (impl_->backend) return impl_->backend->synthesize(text, out, error);
 
-    // 其它引擎没有可复用会话：退回一次性路径。
+    // 未打开会话时仍使用一次性引擎入口。
     TtsRequest req = impl_->req;
     req.text = text;
-    return synth_indextts(req, out, error);
+    return iris::tts::synthesize(req, out, error);
 }
 
-bool TtsSession::is_open() const { return impl_ != nullptr && impl_->qwen != nullptr; }
+bool TtsSession::is_open() const {
+    return impl_ != nullptr && impl_->backend != nullptr && impl_->backend->is_open();
+}
 
 const TtsRequest& TtsSession::request() const { return impl_->req; }
 
@@ -137,12 +239,12 @@ bool synthesize(const TtsRequest& req, TtsResult& out, std::string& error) {
         error = "tts: 待合成文本为空";
         return false;
     }
-    switch (req.engine) {
-        case TtsEngine::Qwen3Tts: return synth_qwen3_tts(req, out, error);
-        case TtsEngine::IndexTts: return synth_indextts(req, out, error);
+    const auto* entry = find_tts_backend(req.engine);
+    if (!entry) {
+        error = "tts: 未知引擎";
+        return false;
     }
-    error = "tts: 未知引擎";
-    return false;
+    return entry->extension.synthesize(req, out, error);
 }
 
 // ---------------------------------------------------------------------------

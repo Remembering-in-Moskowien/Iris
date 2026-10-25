@@ -1,40 +1,84 @@
 #include "iris/view/subtitle_renderer.hpp"
 
+#include <algorithm>
 #include <fstream>
+#include <stdexcept>
+#include <utility>
 
+#include "iris/core/extension_registry.hpp"
 #include "iris/infra/log.hpp"
 
 namespace iris::view {
+namespace {
+
+using RenderFunction = std::string (*)(const model::SubtitleDocument&);
+
+std::string render_ass(const model::SubtitleDocument& document) {
+    return document.render_ass();
+}
+
+std::string render_srt(const model::SubtitleDocument& document) {
+    return document.render_srt();
+}
+
+std::string render_txt(const model::SubtitleDocument& document) {
+    std::string body;
+    for (const auto& line : document.lines) body += line.text + "\n";
+    return body;
+}
+
+struct RenderRegistration {
+    SubtitleFormat format;
+    RenderFunction render;
+};
+
+const core::ExtensionRegistry<RenderRegistration>& renderers() {
+    static const auto registry = [] {
+        core::ExtensionRegistry<RenderRegistration> result;
+        const auto add = [&](std::string id, SubtitleFormat format, RenderFunction render) {
+            std::string error;
+            if (!result.register_extension(std::move(id), {}, {format, render}, error)) {
+                throw std::logic_error("invalid built-in renderer registration: " + error);
+            }
+        };
+        add("ass", SubtitleFormat::Ass, render_ass);
+        add("srt", SubtitleFormat::Srt, render_srt);
+        add("txt", SubtitleFormat::Txt, render_txt);
+        return result;
+    }();
+    return registry;
+}
+
+const core::ExtensionRegistry<RenderRegistration>::Entry* find_renderer(
+    SubtitleFormat format) {
+    const auto& entries = renderers().entries();
+    const auto it = std::find_if(entries.begin(), entries.end(),
+                                 [&](const auto& entry) {
+                                     return entry.extension.format == format;
+                                 });
+    return it == entries.end() ? nullptr : &*it;
+}
+
+} // namespace
 
 bool parse_subtitle_format(const std::string& format, SubtitleFormat& out) {
-    if (format == "ass") {
-        out = SubtitleFormat::Ass;
-        return true;
-    }
-    if (format == "srt") {
-        out = SubtitleFormat::Srt;
-        return true;
-    }
-    if (format == "txt") {
-        out = SubtitleFormat::Txt;
-        return true;
-    }
-    return false;
+    const auto* entry = renderers().find(format);
+    if (!entry) return false;
+    out = entry->extension.format;
+    return true;
 }
 
 std::string render_subtitles(const model::SubtitleDocument& doc, SubtitleFormat format) {
-    switch (format) {
-        case SubtitleFormat::Srt:
-            return doc.render_srt();
-        case SubtitleFormat::Txt: {
-            std::string body;
-            for (const auto& ln : doc.lines) body += ln.text + "\n";
-            return body;
-        }
-        case SubtitleFormat::Ass:
-        default:
-            return doc.render_ass();
+    const auto* entry = find_renderer(format);
+    return entry ? entry->extension.render(doc) : render_ass(doc);
+}
+
+std::vector<RenderFormatInfo> registered_render_formats() {
+    std::vector<RenderFormatInfo> out;
+    for (const auto& entry : renderers().entries()) {
+        out.push_back({entry.id, entry.extension.format});
     }
+    return out;
 }
 
 bool SubtitleRenderer::execute(core::PipelineContext& ctx) {
@@ -76,6 +120,7 @@ bool SubtitleRenderer::execute(core::PipelineContext& ctx) {
         return false;
     }
 
+    ctx.subtitle_path = out_path;
     ctx.record_provenance(name());
     spdlog::info("build: 已生成 {}（{} 行）", out_path, doc.lines.size());
     return true;

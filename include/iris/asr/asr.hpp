@@ -28,6 +28,17 @@ bool parse_asr_backend(const std::string& engine, AsrBackend& out);
 /// 由 cmake/dependencies.cmake 探测 tools/runtimes 后注入 IRIS_HAS_CRISPASR / IRIS_HAS_CT2。
 bool asr_backend_available(AsrBackend backend);
 
+/// 已注册的内置 ASR 后端（按注册顺序；供 plugin list / 诊断使用）。
+struct AsrBackendInfo {
+    std::string id;                   ///< 规范 ID（CLI --engine 的首选值）
+    std::vector<std::string> aliases; ///< 兼容别名
+    AsrBackend backend;               ///< 类型安全的内部枚举
+    bool available = false;           ///< 本次构建是否带对应运行时
+};
+
+/// 枚举静态注册的 ASR 后端。返回副本，调用方可自由排序/过滤。
+std::vector<AsrBackendInfo> registered_asr_backends();
+
 /// 进程内 ASR 引擎（Controller 层经 ops::Transcribe 使用）。
 ///
 /// whisper(ggml) / qwen3-asr(ggml) 由 CrispASR DLL（ggml 运行时）推理；

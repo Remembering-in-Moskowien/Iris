@@ -19,6 +19,15 @@ bool parse_subtitle_format(const std::string& format, SubtitleFormat& out);
 /// txt 为纯文本行（每行一条字幕文本）。
 std::string render_subtitles(const model::SubtitleDocument& doc, SubtitleFormat format);
 
+/// 已注册的内置渲染格式（供 plugin list / 诊断使用）。
+struct RenderFormatInfo {
+    std::string id;       ///< 规范 ID（build --format 的取值）
+    SubtitleFormat format; ///< 类型安全的内部枚举
+};
+
+/// 枚举静态注册的渲染格式。返回副本，调用方可自由排序/过滤。
+std::vector<RenderFormatInfo> registered_render_formats();
+
 /// 对应 C# build 命令：把 IR 中的句子渲染为 ASS/SRT/TXT（管线操作符形态）。
 class SubtitleRenderer : public core::Operator {
 public:

@@ -16,7 +16,7 @@
 ## 快速开始
 
 ```bash
-# 1. 配置并构建（需要 CMake ≥ 3.20 + C++20 编译器）
+# 1. 配置并构建（需要 CMake ≥ 3.24 + C++20 编译器）
 cmake -S . -B build -DIRIS_BUILD_TESTS=ON
 cmake --build build --config Release
 
@@ -41,12 +41,14 @@ ASR 推理全部在进程内完成，**不依赖外部 ASR 可执行文件**（�
 | `whisper`（默认） | ggml GGUF（如 ggml-base.bin） | [CrispStrobe/CrispASR](https://github.com/CrispStrobe/CrispASR)（ggml） |
 | `qwen3-asr` | ggml GGUF（qwen3-asr 模型） | [CrispStrobe/CrispASR](https://github.com/CrispStrobe/CrispASR)（ggml） |
 | `whisper-ct2` | CTranslate2 模型目录（`ct2-transformers-converter` 转换） | [OpenNMT/CTranslate2](https://github.com/OpenNMT/CTranslate2)（transformer） |
+| `whisper-onnx` | WhisperX/Xenova 目录（`encoder_model.onnx`、`decoder_model_merged.onnx`、`tokenizer.json`） | Iris 自写 ONNX 编排（ONNX Runtime） |
 | `sensevoice-onnx` | 目录：`model.int8.onnx` + `tokens.txt` | **Iris 自写 ONNX 编排**（kaldi fbank + LFR + CMVN + CTC） |
 | `paraformer-onnx` | 目录：`model.int8.onnx` + `tokens.txt` | 同上（中文，非自回归 CTC） |
 
 ```bash
 build/bin/iris asr demo.mp4 --engine qwen3-asr --language zh --model /path/to/qwen3-asr.gguf
 build/bin/iris asr demo.mp4 --engine whisper-ct2 --language en --model /path/to/whisper-ct2-model/
+build/bin/iris asr demo.mp4 --engine whisper-onnx --language en --model models/whisper-onnx
 build/bin/iris asr demo.mp4 --engine sensevoice-onnx --language en --model models/sensevoice
 build/bin/iris asr demo.wav --engine paraformer-onnx --language zh --model models/paraformer
 ```
@@ -75,6 +77,10 @@ whisper-onnx，缺 `ct2/` 就没有 whisper-ct2。当前可用后端见 `iris do
 ```bash
 cmake -S . -B build -DIRIS_RUNTIMES_DIR=/nonexistent
 ```
+
+### 插件扩展（当前阶段）
+
+ASR/TTS 后端与字幕渲染格式使用编译期静态注册表进行名称解析、可用性检查与执行分发；`iris plugin list` 按 operation/asr/tts/render 列出静态注册项及可用性（`--json` 可机读），`iris plugin validate <pipeline.json>` 校验 manifest 并检查本构建的 ASR 运行时，`iris run <pipeline.json> <media>` 执行已注册的管线。当前仅执行随 Iris 一起编译的受信任代码，不加载用户脚本或动态库。Lua/Python 隔离插件、签名包管理/权限执行以及 T2 C ABI 动态加载尚未实现。详见[插件与内置扩展文档](docs/plugins.md)。
 
 ---
 

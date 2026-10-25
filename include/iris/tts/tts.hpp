@@ -34,6 +34,17 @@ const char* tts_engine_name(TtsEngine engine);
 /// 引擎运行时是否随本次构建可用（对应 IRIS_HAS_CRISPASR / IRIS_HAS_ONNX）。
 bool tts_engine_available(TtsEngine engine);
 
+/// 已注册的内置 TTS 引擎（按注册顺序；供 plugin list / 诊断使用）。
+struct TtsEngineInfo {
+    std::string id;                   ///< 规范 ID（CLI --engine 的首选值）
+    std::vector<std::string> aliases; ///< 兼容别名
+    TtsEngine engine;                 ///< 类型安全的内部枚举
+    bool available = false;           ///< 本次构建是否带对应运行时
+};
+
+/// 枚举静态注册的 TTS 引擎。返回副本，调用方可自由排序/过滤。
+std::vector<TtsEngineInfo> registered_tts_engines();
+
 /// 一次合成请求（引擎无关；未使用的字段由各引擎忽略）。
 struct TtsRequest {
     TtsEngine engine = TtsEngine::Qwen3Tts;

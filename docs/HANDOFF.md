@@ -38,7 +38,8 @@ iris 是 **Centurion（C#/.NET 10）的 C++20 迁移**：媒体 → 字幕/配�
 
 - 顶层命令：**15/16**（只缺 `update`；`migrate` 无需求）
 - 链路：媒体/字幕/剧本/硬字幕四类入口全部打通
-- 测试：**78/78 通过**（`ctest --test-dir build -C Release`；lint 7 + build 8 + karaoke 7 + rules/diff 6 + align 3 + project 2）
+- 测试：**90/90 通过**（`ctest --test-dir build -C Release`；本次新增 extension/manifest 3 个用例）
+- 插件：P0/P1 已落地——ASR/TTS/render 静态注册表（`ExtensionRegistry`）、`plugin list`（含 `--json`）、`plugin validate`（结构 + 本机运行时）、`run <pipeline.json>`（facet DAG 校验 + 执行）；T2 DLL / T3 进程插件仍未实现（见 `docs/plugins.md`）
 - 发布：多平台 GitHub Actions（Windows/Linux/macOS），按 `run_number` 出 `v{n}`
 
 ## 4. 关键决策（改动前先读）
@@ -97,6 +98,10 @@ iris diff out.iris.json --reference 参考.ass --cjk-only
 iris align 视频.mkv --ir out.iris.json --model models/aligner/qwen3-forced-aligner-0.6b-q4_k.gguf
 iris project scan 作品目录 --html ledger.html      # 只读台账
 iris project run 作品目录 --out-dir iris-out       # 批量流水线（可增量）
+iris plugin list                                   # operation/asr/tts/render 注册表
+iris plugin validate docs/pipeline-asr.json        # 结构 + 本机 ASR 运行时校验
+iris run docs/pipeline-asr.json models/jfk.wav -l en -o jfk.iris.json --render-output jfk.ass
+iris --json plugin list                            # 结构化扩展清单
 iris --json asr in.mp4 ...        # 单 JSON 文档
 iris serve --port 8080            # REST（POST /jobs, GET /jobs/{id}）
 ```

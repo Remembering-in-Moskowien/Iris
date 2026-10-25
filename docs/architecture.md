@@ -58,7 +58,13 @@ class Operator {
 ### Provider（提供者）
 
 本地优先、云兜底的推理抽象：ASR / OCR / LLM / TTS / Diarization / VocalSeparation
-各定义接口；`ProviderRegistry` 管理注册项，`models` 命令展示。
+各定义接口。当前 `ProviderRegistry` 管理展示用的提供者元数据；实际 ASR/TTS 后端与字幕渲染格式由类型化扩展注册表选择和分发。
+
+### 内置扩展与插件边界
+
+ASR、TTS 与字幕渲染器的内置实现在 Iris 编译时静态注册。注册项包含规范 ID、CLI 别名、构建运行时可用性及类型安全的执行/会话工厂；名称解析、可用性查询和执行分发使用同一注册项，避免元数据与实际执行路径各自维护一份枚举分支。`core::ExtensionRegistry<T>` 会拒绝空 ID、空别名及重复 ID/别名，`iris plugin list` 直接枚举这些注册项。
+
+当前扩展边界仅包含随 Iris 编译和发布的受信任实现，不从磁盘加载第三方代码。Pipeline JSON 编排现由静态内置操作符实现，支持 DAG/facet 校验、渲染与 ASS lint；它不执行插件脚本。设计草案中的 Lua/Python 执行、插件安装与签名/权限机制仍未实现，T2 C ABI 动态库加载继续保留；它们不是当前注册表的隐含能力。
 
 ### IR 契约（*.iris.json v1.0）
 

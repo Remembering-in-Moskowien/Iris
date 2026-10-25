@@ -17,11 +17,12 @@ public:
 
     /// 按依赖拓扑执行全部操作符；任一失败立即停止。
     /// 返回是否全部成功。
-    bool run(PipelineContext& ctx);
+    bool run(PipelineContext& ctx, std::string* error = nullptr);
 
 private:
     /// Kahn 拓扑排序；存在环或缺失依赖返回 false。
-    bool topo_sort(std::vector<std::shared_ptr<Operator>>& out) const;
+    bool topo_sort(std::vector<std::shared_ptr<Operator>>& out,
+                   std::string* error) const;
 
     std::vector<std::shared_ptr<Operator>> ops_;
 };

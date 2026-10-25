@@ -1,0 +1,38 @@
+{
+  "apiVersion": 1,
+  "nodes": [
+    {
+      "id": "convert",
+      "operation": "ffmpeg_convert"
+    },
+    {
+      "id": "preprocess",
+      "operation": "audio_preprocess",
+      "dependsOn": ["convert"]
+    },
+    {
+      "id": "transcribe",
+      "operation": "transcribe",
+      "dependsOn": ["preprocess"],
+      "parameters": {
+        "engine": "whisper",
+        "model": "models/ggml/ggml-base.bin"
+      }
+    },
+    {
+      "id": "split",
+      "operation": "sentence_split",
+      "dependsOn": ["transcribe"]
+    },
+    {
+      "id": "render",
+      "operation": "build",
+      "dependsOn": ["split"]
+    },
+    {
+      "id": "check",
+      "operation": "lint",
+      "dependsOn": ["render"]
+    }
+  ]
+}

@@ -40,6 +40,7 @@ include(cmake/dependencies.cmake)
 # ---------------------------------------------------------------------------
 add_library(iris_core
     src/core/pipeline.cpp
+    src/core/pipeline_manifest.cpp
     src/core/provider.cpp
     src/model/config.cpp
     src/model/time.cpp
@@ -153,6 +154,7 @@ add_executable(iris
     src/controller/diff_command.cpp
     src/controller/align_command.cpp
     src/controller/project_command.cpp
+    src/controller/pipeline_command.cpp
     src/controller/models_command.cpp
     src/controller/serve_command.cpp
     src/controller/script_command.cpp)

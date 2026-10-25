@@ -203,6 +203,14 @@ int run_project_scan(const std::vector<std::string>& inputs, const project::Scan
 int run_project_run(const std::vector<std::string>& inputs, const project::RunOptions& options,
                     const std::string& manifest_path, const std::string& out_html);
 
+/// run：按 pipeline.json 执行注册的静态操作符，产出 IR。
+int run_pipeline(const std::string& pipeline_path, const std::string& input,
+                 const std::string& language, const std::string& engine,
+                 const std::string& model, const std::string& output,
+                 const std::string& render_output);
+int run_plugin_list();
+int run_plugin_validate(const std::string& pipeline_path);
+
 /// emotion：语音情感分析（A/D/V 三维，Wav2Small ONNX）。
 int run_emotion(const std::string& onnx_path, const std::string& wav_path);
 

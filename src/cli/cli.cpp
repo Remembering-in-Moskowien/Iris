@@ -481,6 +481,28 @@ int run(int argc, char** argv) {
                       "Manifest path (default: <out-dir>/manifest.json)");
     p_run->add_option("--html", proj_html, "HTML report (default: <out-dir>/project.html)");
 
+    // ---- extension registry ----
+    auto* plugin_cmd = app.add_subcommand("plugin", "Inspect built-in extensions");
+    auto* plugin_list = plugin_cmd->add_subcommand("list", "List registered operations");
+    auto* plugin_validate = plugin_cmd->add_subcommand(
+        "validate", "Validate a pipeline manifest against the registered operations");
+    std::string plugin_manifest_path;
+    plugin_validate->add_option("manifest", plugin_manifest_path,
+                                "Pipeline JSON manifest")->required();
+
+    // ---- pipeline manifest ----
+    auto* run_pipeline_cmd = app.add_subcommand("run", "Execute a validated pipeline manifest");
+    std::string pipeline_path, pipeline_input, pipeline_language = "en";
+    std::string pipeline_engine = "whisper", pipeline_model, pipeline_output, pipeline_render_output;
+    run_pipeline_cmd->add_option("pipeline", pipeline_path, "Pipeline JSON manifest")->required();
+    run_pipeline_cmd->add_option("input", pipeline_input, "Input media file")->required();
+    run_pipeline_cmd->add_option("--language,-l", pipeline_language, "Transcription language");
+    run_pipeline_cmd->add_option("--engine,-e", pipeline_engine, "ASR backend ID");
+    run_pipeline_cmd->add_option("--model,-m", pipeline_model, "ASR model path");
+    run_pipeline_cmd->add_option("--output,-o", pipeline_output, "Output IR path");
+    run_pipeline_cmd->add_option("--render-output", pipeline_render_output,
+                                 "Copy the build node's subtitle artifact to this path");
+
     // ---- init ----
     app.add_subcommand("init", "Interactive setup (stub, planned)");
 
@@ -620,6 +642,15 @@ int run(int argc, char** argv) {
     }
     if (p_run->parsed())
         return controller::run_project_run(proj_inputs, proj_opts, proj_manifest, proj_html);
+    if (plugin_list->parsed()) return controller::run_plugin_list();
+    if (plugin_validate->parsed())
+        return controller::run_plugin_validate(plugin_manifest_path);
+    if (run_pipeline_cmd->parsed()) {
+        if (pipeline_model.empty()) pipeline_model = cfg.resolve(cfg.asr_model);
+        return controller::run_pipeline(pipeline_path, pipeline_input, pipeline_language,
+                                        pipeline_engine, pipeline_model, pipeline_output,
+                                        pipeline_render_output);
+    }
     if (karaoke->parsed())
         return controller::run_karaoke(karaoke_ir, karaoke_out, karaoke_even, karaoke_overwrite,
                                        karaoke_tol);

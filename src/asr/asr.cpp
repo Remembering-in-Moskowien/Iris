@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
+#include "iris/core/extension_registry.hpp"
 #include "iris/asr/ct2_mel.hpp"
 #include "iris/asr/onnx.hpp"
 #include "iris/asr/onnx_funasr.hpp"
@@ -29,17 +32,15 @@ namespace iris::asr {
 
 namespace {
 
-const char* backend_key(AsrBackend b) {
-    switch (b) {
-        case AsrBackend::WhisperGgml: return "whisper";
-        case AsrBackend::Qwen3AsrGgml: return "qwen3-asr";
-        case AsrBackend::WhisperCt2: return "whisper-ct2";
-        case AsrBackend::WhisperOnnx: return "whisper-onnx";
-        case AsrBackend::SenseVoiceOnnx: return "sensevoice-onnx";
-        case AsrBackend::ParaformerOnnx: return "paraformer-onnx";
-    }
-    return "unknown";
-}
+using TranscribeFunction = bool (*)(AsrBackend, const std::string&, const std::string&,
+                                    const std::string&, std::vector<model::Sentence>&,
+                                    std::string&, int);
+
+struct AsrBackendRegistration {
+    AsrBackend backend;
+    bool available;
+    TranscribeFunction transcribe;
+};
 
 } // namespace
 
@@ -294,80 +295,122 @@ bool transcribe_ct2(const std::string& /*model_path*/, const std::string& /*audi
 
 // ---------------------------------------------------------------------------
 
+namespace {
+
+bool dispatch_crispasr(AsrBackend backend, const std::string& model_path,
+                       const std::string& audio_path, const std::string& language,
+                       std::vector<model::Sentence>& out, std::string& error, int n_threads) {
+    return transcribe_crispasr(backend, model_path, audio_path, language, out, error,
+                               n_threads);
+}
+
+bool dispatch_ct2(AsrBackend, const std::string& model_path, const std::string& audio_path,
+                  const std::string& language, std::vector<model::Sentence>& out,
+                  std::string& error, int n_threads) {
+    return transcribe_ct2(model_path, audio_path, language, out, error, n_threads);
+}
+
+bool dispatch_onnx(AsrBackend, const std::string& model_path, const std::string& audio_path,
+                   const std::string& language, std::vector<model::Sentence>& out,
+                   std::string& error, int) {
+    return transcribe_onnx(model_path, audio_path, language, out, error);
+}
+
+bool dispatch_sensevoice(AsrBackend, const std::string& model_path,
+                         const std::string& audio_path, const std::string& language,
+                         std::vector<model::Sentence>& out, std::string& error, int n_threads) {
+    FunasrOptions options;
+    options.model_dir = model_path;
+    options.language = language;
+    options.n_threads = n_threads;
+    return transcribe_funasr(FunasrModel::SenseVoice, options, audio_path, out, error);
+}
+
+bool dispatch_paraformer(AsrBackend, const std::string& model_path,
+                         const std::string& audio_path, const std::string& language,
+                         std::vector<model::Sentence>& out, std::string& error, int n_threads) {
+    FunasrOptions options;
+    options.model_dir = model_path;
+    options.language = language;
+    options.n_threads = n_threads;
+    return transcribe_funasr(FunasrModel::Paraformer, options, audio_path, out, error);
+}
+
+const core::ExtensionRegistry<AsrBackendRegistration>& asr_backends() {
+    static const auto registry = [] {
+        core::ExtensionRegistry<AsrBackendRegistration> result;
+        const auto add = [&](std::string id, std::vector<std::string> aliases,
+                             AsrBackend backend, bool available,
+                             TranscribeFunction transcribe) {
+            std::string error;
+            if (!result.register_extension(std::move(id), std::move(aliases),
+                                           {backend, available, transcribe}, error)) {
+                throw std::logic_error("invalid built-in ASR registration: " + error);
+            }
+        };
+        add("whisper", {}, AsrBackend::WhisperGgml, IRIS_HAS_CRISPASR != 0,
+            dispatch_crispasr);
+        add("qwen3-asr", {}, AsrBackend::Qwen3AsrGgml, IRIS_HAS_CRISPASR != 0,
+            dispatch_crispasr);
+        add("whisper-ct2", {}, AsrBackend::WhisperCt2, IRIS_HAS_CT2 != 0, dispatch_ct2);
+        add("whisper-onnx", {}, AsrBackend::WhisperOnnx, IRIS_HAS_ONNX != 0,
+            dispatch_onnx);
+        add("sensevoice-onnx", {"sensevoice"}, AsrBackend::SenseVoiceOnnx,
+            IRIS_HAS_ONNX != 0, dispatch_sensevoice);
+        add("paraformer-onnx", {"paraformer"}, AsrBackend::ParaformerOnnx,
+            IRIS_HAS_ONNX != 0, dispatch_paraformer);
+        return result;
+    }();
+    return registry;
+}
+
+const core::ExtensionRegistry<AsrBackendRegistration>::Entry*
+find_asr_backend(AsrBackend backend) {
+    const auto& entries = asr_backends().entries();
+    const auto it = std::find_if(entries.begin(), entries.end(),
+                                 [&](const auto& entry) {
+                                     return entry.extension.backend == backend;
+                                 });
+    return it == entries.end() ? nullptr : &*it;
+}
+
+} // namespace
+
 bool parse_asr_backend(const std::string& engine, AsrBackend& out) {
-    if (engine == "whisper") {
-        out = AsrBackend::WhisperGgml;
-        return true;
-    }
-    if (engine == "qwen3-asr") {
-        out = AsrBackend::Qwen3AsrGgml;
-        return true;
-    }
-    if (engine == "whisper-ct2") {
-        out = AsrBackend::WhisperCt2;
-        return true;
-    }
-    if (engine == "whisper-onnx") {
-        out = AsrBackend::WhisperOnnx;
-        return true;
-    }
-    if (engine == "sensevoice-onnx" || engine == "sensevoice") {
-        out = AsrBackend::SenseVoiceOnnx;
-        return true;
-    }
-    if (engine == "paraformer-onnx" || engine == "paraformer") {
-        out = AsrBackend::ParaformerOnnx;
-        return true;
-    }
-    return false;
+    const auto* entry = asr_backends().find(engine);
+    if (!entry) return false;
+    out = entry->extension.backend;
+    return true;
 }
 
 bool asr_backend_available(AsrBackend backend) {
-    switch (backend) {
-        case AsrBackend::WhisperGgml:
-        case AsrBackend::Qwen3AsrGgml:
-            return IRIS_HAS_CRISPASR != 0;
-        case AsrBackend::WhisperCt2:
-            return IRIS_HAS_CT2 != 0;
-        case AsrBackend::WhisperOnnx:
-        case AsrBackend::SenseVoiceOnnx:
-        case AsrBackend::ParaformerOnnx:
-            return IRIS_HAS_ONNX != 0;
+    const auto* entry = find_asr_backend(backend);
+    return entry != nullptr && entry->extension.available;
+}
+
+std::vector<AsrBackendInfo> registered_asr_backends() {
+    std::vector<AsrBackendInfo> out;
+    for (const auto& entry : asr_backends().entries()) {
+        out.push_back({entry.id, entry.aliases, entry.extension.backend,
+                       entry.extension.available});
     }
-    return false;
+    return out;
 }
 
 std::string AsrEngine::name() const {
-    return std::string("asr-engine (") + backend_key(backend_) + ")";
+    const auto* entry = find_asr_backend(backend_);
+    return std::string("asr-engine (") + (entry ? entry->id : "unknown") + ")";
 }
 
 bool AsrEngine::transcribe(const std::string& audio_path, const std::string& language,
                           std::vector<model::Sentence>& out, std::string& error) {
-    switch (backend_) {
-        case AsrBackend::WhisperGgml:
-        case AsrBackend::Qwen3AsrGgml:
-            return transcribe_crispasr(backend_, model_path_, audio_path, language, out, error, n_threads_);
-        case AsrBackend::WhisperCt2:
-            return transcribe_ct2(model_path_, audio_path, language, out, error, n_threads_);
-        case AsrBackend::WhisperOnnx:
-            return transcribe_onnx(model_path_, audio_path, language, out, error);
-        case AsrBackend::SenseVoiceOnnx: {
-            FunasrOptions opt;
-            opt.model_dir = model_path_;
-            opt.language = language;
-            opt.n_threads = n_threads_;
-            return transcribe_funasr(FunasrModel::SenseVoice, opt, audio_path, out, error);
-        }
-        case AsrBackend::ParaformerOnnx: {
-            FunasrOptions opt;
-            opt.model_dir = model_path_;
-            opt.language = language;
-            opt.n_threads = n_threads_;
-            return transcribe_funasr(FunasrModel::Paraformer, opt, audio_path, out, error);
-        }
+    const auto* entry = find_asr_backend(backend_);
+    if (!entry) {
+        error = "未知 ASR 后端";
+        return false;
     }
-    error = "未知 ASR 后端";
-    return false;
+    return entry->extension.transcribe(backend_, model_path_, audio_path, language,
+                                       out, error, n_threads_);
 }
 
 } // namespace iris::asr

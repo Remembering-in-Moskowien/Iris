@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "iris/model/subtitle.hpp"
+#include "iris/view/subtitle_renderer.hpp"
 
 using iris::model::SubtitleDocument;
 using iris::model::SubtitleLine;
@@ -57,4 +58,26 @@ TEST_CASE("SRT render includes index and timeline") {
     const auto srt = doc.render_srt();
     REQUIRE(srt.find("00:00:00,000 --> 00:00:01,000") != std::string::npos);
     REQUIRE(srt.find("Hi") != std::string::npos);
+}
+
+TEST_CASE("Subtitle formats use registered renderers") {
+    using iris::view::SubtitleFormat;
+    SubtitleFormat format{};
+    REQUIRE(iris::view::parse_subtitle_format("ass", format));
+    REQUIRE(format == SubtitleFormat::Ass);
+    REQUIRE(iris::view::parse_subtitle_format("srt", format));
+    REQUIRE(format == SubtitleFormat::Srt);
+    REQUIRE(iris::view::parse_subtitle_format("txt", format));
+    REQUIRE(format == SubtitleFormat::Txt);
+    REQUIRE_FALSE(iris::view::parse_subtitle_format("vtt", format));
+
+    SubtitleDocument document;
+    SubtitleLine line;
+    line.start = TimeCode(0);
+    line.end = TimeCode(1000);
+    line.text = "Hello";
+    document.lines.push_back(line);
+    REQUIRE(iris::view::render_subtitles(document, SubtitleFormat::Txt) == "Hello\n");
+    REQUIRE(iris::view::render_subtitles(document, SubtitleFormat::Srt).find("Hello") !=
+            std::string::npos);
 }
