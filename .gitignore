@@ -30,3 +30,7 @@ iris.config.json
 # Test media and generated outputs
 /test-media/
 /tests/_output/
+
+# Python bytecode (T3 plugins)
+__pycache__/
+*.py[cod]

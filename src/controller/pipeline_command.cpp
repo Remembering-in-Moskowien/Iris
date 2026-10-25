@@ -15,6 +15,7 @@
 #include "iris/infra/log.hpp"
 #include "iris/infra/paths.hpp"
 #include "iris/model/ir_document.hpp"
+#include "iris/plugin/plugin_manifest.hpp"
 #include "iris/tts/tts.hpp"
 #include "iris/ui/console.hpp"
 #include "iris/view/subtitle_renderer.hpp"
@@ -61,6 +62,11 @@ std::string join_facets(const std::vector<core::Facet>& facets) {
 }
 
 const char* yes_no(bool value) { return value ? "yes" : "no"; }
+
+bool ends_with(const std::string& text, const std::string& suffix) {
+    return text.size() >= suffix.size() &&
+           text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
 
 } // namespace
 
@@ -198,6 +204,7 @@ int run_plugin_list() {
     const auto asr_backends = asr::registered_asr_backends();
     const auto tts_engines = tts::registered_tts_engines();
     const auto renderers = view::registered_render_formats();
+    const auto discovered = plugin::discover_plugins();
 
     if (ui::json_mode()) {
         nlohmann::json document;
@@ -231,6 +238,20 @@ int run_plugin_list() {
         for (const auto& renderer : renderers) {
             document["renderers"].push_back({{"id", renderer.id}});
         }
+        document["process"] = nlohmann::json::array();
+        for (const auto& item : discovered.plugins) {
+            document["process"].push_back(
+                {{"id", item.id},
+                 {"kind", item.kind},
+                 {"version", item.version},
+                 {"enabled", item.enabled},
+                 {"description", item.description},
+                 {"manifest", infra::path_to_utf8(item.manifest_path)}});
+        }
+        document["issues"] = nlohmann::json::array();
+        for (const auto& issue : discovered.issues) {
+            document["issues"].push_back({{"path", issue.path}, {"error", issue.error}});
+        }
         ui::json_out(document.dump(2));
         return 0;
     }
@@ -258,14 +279,66 @@ int run_plugin_list() {
     for (const auto& renderer : renderers) {
         rows.push_back({"render", renderer.id, "format: " + renderer.id});
     }
+    for (const auto& item : discovered.plugins) {
+        rows.push_back({"process", item.id,
+                        "kind: " + item.kind + "; version: " + item.version +
+                            "; enabled: " + yes_no(item.enabled) +
+                            "; manifest: " + infra::path_to_utf8(item.manifest_path)});
+    }
+    for (const auto& issue : discovered.issues) {
+        rows.push_back({"issue", issue.path, issue.error});
+    }
     ui::table({"kind", "id", "details"}, rows);
     return 0;
 }
 
-int run_plugin_validate(const std::string& pipeline_path) {
+int run_plugin_validate(const std::string& path) {
+    namespace fs = std::filesystem;
+    const fs::path requested = infra::utf8_path(path);
+    std::error_code ec;
+    const std::string filename = infra::path_to_utf8(requested.filename());
+    const bool plugin_candidate =
+        fs::is_directory(requested, ec) || filename == "plugin.json" ||
+        ends_with(filename, ".plugin.json");
+
+    const auto report_plugin = [&](const plugin::PluginManifest& manifest) {
+        if (ui::json_mode()) {
+            nlohmann::json result{
+                {"ok", true},
+                {"kind", "plugin"},
+                {"id", manifest.id},
+                {"pluginKind", manifest.kind},
+                {"version", manifest.version},
+                {"apiVersion", manifest.api_version},
+                {"enabled", manifest.enabled},
+                {"manifest", infra::path_to_utf8(manifest.manifest_path)}};
+            ui::json_out(result.dump(2));
+        } else {
+            spdlog::info("plugin validate: '{}' is a valid {} plugin (api {})",
+                         manifest.id, manifest.kind, manifest.api_version);
+        }
+        return 0;
+    };
+
+    if (plugin_candidate) {
+        plugin::PluginManifest manifest;
+        std::string error;
+        if (!plugin::PluginManifest::load(path, manifest, error)) {
+            spdlog::error("plugin validate: {}", error);
+            return 1;
+        }
+        return report_plugin(manifest);
+    }
+
     core::PipelineManifest manifest;
     std::string error;
-    if (!core::PipelineManifest::load(pipeline_path, manifest, error)) {
+    if (!core::PipelineManifest::load(path, manifest, error)) {
+        // 允许用户把插件清单存成任意 .json 名字：管线解析失败后再试一次。
+        plugin::PluginManifest plugin_manifest;
+        std::string plugin_error;
+        if (plugin::PluginManifest::load(path, plugin_manifest, plugin_error)) {
+            return report_plugin(plugin_manifest);
+        }
         spdlog::error("plugin validate: {}", error);
         return 1;
     }
@@ -292,6 +365,7 @@ int run_plugin_validate(const std::string& pipeline_path) {
 
     if (ui::json_mode()) {
         nlohmann::json result{{"ok", true},
+                              {"kind", "pipeline"},
                               {"apiVersion", manifest.api_version},
                               {"nodes", manifest.nodes.size()}};
         ui::json_out(result.dump(2));

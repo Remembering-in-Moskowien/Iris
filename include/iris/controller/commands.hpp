@@ -209,7 +209,21 @@ int run_pipeline(const std::string& pipeline_path, const std::string& input,
                  const std::string& model, const std::string& output,
                  const std::string& render_output);
 int run_plugin_list();
-int run_plugin_validate(const std::string& pipeline_path);
+int run_plugin_validate(const std::string& path);
+
+/// plugin invoke：启动一个 T3 进程插件并调用 describe/invoke（见 docs/plugins.md）。
+int run_plugin_invoke(const std::string& id, const std::string& method,
+                      const std::string& kind, const std::string& input_path,
+                      const std::string& params_json, const std::string& out_path,
+                      int timeout_ms);
+
+/// plugin check：对一份 JSON 输入运行所有启用的 T3 check 插件并汇总结果。
+int run_plugin_check(const std::string& input_path, const std::string& params_json,
+                     const std::string& only_id);
+
+/// plugin new：生成 Python 进程插件骨架（plugin.json + main.py）。
+int run_plugin_new(const std::string& id, const std::string& kind, const std::string& dir,
+                   bool force);
 
 /// emotion：语音情感分析（A/D/V 三维，Wav2Small ONNX）。
 int run_emotion(const std::string& onnx_path, const std::string& wav_path);

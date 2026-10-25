@@ -60,9 +60,71 @@ currently accepts ASS/SSA artifacts only and reports a clear error for other ren
 
 `core::ExtensionRegistry<T>` 提供通用的类型化注册、规范 ID/别名查找和重复项校验。ASR、TTS 与字幕渲染器都在各自实现中构建注册表，`iris plugin list` 的清单直接来自这些注册项，当前仅供随 Iris 一起编译的内置扩展使用。现有 `core::ProviderRegistry` 仍是提供者元数据目录，不承担执行分发。
 
+## T3 进程插件
+
+T3 插件是独立进程，宿主通过 stdin/stdout 的逐行 JSON 与它通信；Iris 不加载插件代码，因此插件崩溃、内存错误或依赖冲突只影响该进程。宿主负责启动、`describe` 握手、调用超时、崩溃检测与下一次调用时自动重启。
+
+### 清单与搜索路径
+
+插件放在目录中，目录里含 `plugin.json`；也可以直接放 `*.plugin.json`：
+
+```json
+{
+  "id": "acme.check.cps",
+  "kind": "check",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "protocol": "stdio-jsonl",
+  "command": "python",
+  "args": ["check.py"],
+  "timeoutMs": 5000,
+  "permissions": ["fs:read"],
+  "enabled": true
+}
+```
+
+- `id`：字母/下划线开头，只含字母、数字、`.`、`_`、`-`。
+- `kind`：`check`、`render`、`textop`、`parse`、`asr`、`tts`、`mt`、`report`、`model-source`。
+- `command`：可执行文件；不含路径分隔符时按 `PATH` 查找，相对路径按插件目录解析。
+- `cwd`：可选，默认插件目录。
+- `permissions`：`fs:read`、`fs:write`、`net`、`exec`、`env`、`process` 的声明，目前用于展示与审计，不做 OS 级强制。
+- 默认搜索顺序（项目优先）：`./.iris/plugins` → `./plugins` → `<data_root>/plugins` → `%LOCALAPPDATA%/iris/plugins`（POSIX 为 `$XDG_DATA_HOME/iris/plugins`）。同 ID 先出现者生效。`IRIS_PLUGIN_DIRS` 可追加搜索目录（Windows 用 `;` 分隔，POSIX 用 `:` 分隔），自定义目录优先。
+
+### 协议
+
+stdin/stdout 都是一行一个 UTF-8 JSON 对象；stdout 只放协议消息，日志走 stderr 或通知：
+
+```text
+-> {"id":1,"method":"describe","params":{}}
+<- {"id":1,"result":{"id":"acme.check.cps","kind":"check","version":"0.1.0","apiVersion":1}}
+-> {"id":2,"method":"invoke","params":{"kind":"check","input":{...},"params":{...}}}
+<- {"id":2,"result":{...}}
+<- {"id":2,"error":{"code":"plugin_error","message":"..."}}
+<- {"method":"log","params":{"level":"info","message":"..."}}
+```
+
+`describe` 必须返回与清单一致的 `id`、`kind` 和 `apiVersion: 1`。调用是同步的；超时或进程退出会标记插件为 `degraded`，下一次调用自动拉起新进程。
+
+### CLI
+
+```powershell
+iris plugin list                                   # 静态注册项 + 发现的进程插件 + 清单问题
+iris plugin validate plugins/example-check          # 校验 plugin.json（不启动进程）
+iris plugin invoke example.check.cps --method describe
+iris plugin invoke example.check.cps --method invoke --input input.json --params '{"maxCps":5}'
+iris plugin check input.json --params '{"maxCps":5}'   # 运行所有启用的 check 插件并汇总
+iris plugin new my.check.rules --kind check --dir plugins
+```
+
+`plugin invoke --out` 把结果写入文件；全局 `--json` 下 stdout 只输出一个结果文档。`plugin new` 生成自包含的 `plugin.json`、`main.py` 和 `README.md`，Python 解释器按平台写为 `python`（Windows）/`python3`（POSIX）。
+
+### Python SDK
+
+[`plugins/iris_plugin.py`](../plugins/iris_plugin.py) 提供 `Plugin`、`@plugin` 与 `serve()`；[`plugins/example-check`](../plugins/example-check) 是可运行的 check 插件示例。SDK 只依赖标准库，不导入 Iris 内部头文件/库。
+
 ## 信任边界与未实现能力
 
-当前 pipeline 操作仍为随程序编译的内置代码。声明式 JSON 不是脚本沙箱，也不授权任意函数或宿主操作。用户脚本进程、签名包管理、权限执行、插件仓库和 T2 C ABI 动态库仍未实现；在这些能力完成前，不允许不可信代码加载。
+当前 pipeline 操作仍为随程序编译的内置代码，T3 进程插件按清单启动外部程序。声明式 JSON 不是脚本沙箱；进程插件以当前用户权限运行，`permissions` 目前只做声明/展示，不做 OS 级强制。用户脚本进程的安装/签名/权限执行、插件仓库和 T2 C ABI 动态库仍未实现；在这些能力完成前，不允许不可信代码加载。
 
 ## 增加内置后端
 

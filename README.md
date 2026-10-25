@@ -80,7 +80,7 @@ cmake -S . -B build -DIRIS_RUNTIMES_DIR=/nonexistent
 
 ### 插件扩展（当前阶段）
 
-ASR/TTS 后端与字幕渲染格式使用编译期静态注册表进行名称解析、可用性检查与执行分发；`iris plugin list` 按 operation/asr/tts/render 列出静态注册项及可用性（`--json` 可机读），`iris plugin validate <pipeline.json>` 校验 manifest 并检查本构建的 ASR 运行时，`iris run <pipeline.json> <media>` 执行已注册的管线。当前仅执行随 Iris 一起编译的受信任代码，不加载用户脚本或动态库。Lua/Python 隔离插件、签名包管理/权限执行以及 T2 C ABI 动态加载尚未实现。详见[插件与内置扩展文档](docs/plugins.md)。
+ASR/TTS 后端与字幕渲染格式使用编译期静态注册表进行名称解析、可用性检查与执行分发；`iris plugin list` 按 operation/asr/tts/render 列出静态注册项及可用性，并发现 `plugins/` 下的 T3 进程插件（`--json` 可机读）；`iris plugin validate <pipeline.json|plugin.json>` 校验 manifest，`iris run <pipeline.json> <media>` 执行已注册管线。T3 插件通过 `iris plugin invoke` 启动/调用，是独立进程（stdin/stdout 逐行 JSON），崩溃或超时只影响该插件并在下一次调用时自动重启；`iris plugin check` 运行所有 check 插件并汇总问题，Python SDK 见 `plugins/iris_plugin.py`。T2 C ABI 动态库加载、签名包管理与 OS 级权限沙箱尚未实现。详见[插件与内置扩展文档](docs/plugins.md)。
 
 ---
 

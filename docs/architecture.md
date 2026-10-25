@@ -64,7 +64,7 @@ class Operator {
 
 ASR、TTS 与字幕渲染器的内置实现在 Iris 编译时静态注册。注册项包含规范 ID、CLI 别名、构建运行时可用性及类型安全的执行/会话工厂；名称解析、可用性查询和执行分发使用同一注册项，避免元数据与实际执行路径各自维护一份枚举分支。`core::ExtensionRegistry<T>` 会拒绝空 ID、空别名及重复 ID/别名，`iris plugin list` 直接枚举这些注册项。
 
-当前扩展边界仅包含随 Iris 编译和发布的受信任实现，不从磁盘加载第三方代码。Pipeline JSON 编排现由静态内置操作符实现，支持 DAG/facet 校验、渲染与 ASS lint；它不执行插件脚本。设计草案中的 Lua/Python 执行、插件安装与签名/权限机制仍未实现，T2 C ABI 动态库加载继续保留；它们不是当前注册表的隐含能力。
+当前扩展边界包含随 Iris 编译的静态内置实现，以及从 `plugins/` 目录按 `plugin.json` 启动的 T3 独立进程插件。进程插件通过 stdin/stdout 的逐行 JSON 通信，宿主不加载其代码；T2 C ABI 动态库加载、插件签名/安装和 OS 级权限沙箱仍未实现。Pipeline JSON 编排仍由静态内置操作符实现，支持 DAG/facet 校验、渲染与 ASS lint。
 
 ### IR 契约（*.iris.json v1.0）
 

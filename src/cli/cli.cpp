@@ -482,13 +482,53 @@ int run(int argc, char** argv) {
     p_run->add_option("--html", proj_html, "HTML report (default: <out-dir>/project.html)");
 
     // ---- extension registry ----
-    auto* plugin_cmd = app.add_subcommand("plugin", "Inspect built-in extensions");
-    auto* plugin_list = plugin_cmd->add_subcommand("list", "List registered operations");
+    auto* plugin_cmd = app.add_subcommand("plugin", "Inspect extensions and run process plugins");
+    auto* plugin_list = plugin_cmd->add_subcommand(
+        "list", "List registered operations, backends and process plugins");
     auto* plugin_validate = plugin_cmd->add_subcommand(
-        "validate", "Validate a pipeline manifest against the registered operations");
+        "validate", "Validate a pipeline manifest or a T3 plugin manifest");
     std::string plugin_manifest_path;
     plugin_validate->add_option("manifest", plugin_manifest_path,
-                                "Pipeline JSON manifest")->required();
+                                "Pipeline JSON manifest or plugin directory/plugin.json")
+        ->required();
+
+    auto* plugin_invoke =
+        plugin_cmd->add_subcommand("invoke", "Start a T3 process plugin and call it");
+    std::string plugin_invoke_id, plugin_invoke_method = "describe", plugin_invoke_kind;
+    std::string plugin_invoke_input, plugin_invoke_params, plugin_invoke_out;
+    int plugin_invoke_timeout = 0;
+    plugin_invoke->add_option("id", plugin_invoke_id, "Plugin ID")->required();
+    plugin_invoke->add_option("--method", plugin_invoke_method,
+                              "describe | invoke | any protocol method")
+        ->capture_default_str();
+    plugin_invoke->add_option("--kind", plugin_invoke_kind,
+                              "Override the kind sent to invoke (default: manifest kind)");
+    plugin_invoke->add_option("--input,-i", plugin_invoke_input,
+                              "JSON file passed as invoke input");
+    plugin_invoke->add_option("--params", plugin_invoke_params,
+                              "Inline JSON object passed as invoke params");
+    plugin_invoke->add_option("--out,-o", plugin_invoke_out,
+                              "Write the plugin result JSON to this path");
+    plugin_invoke->add_option("--timeout", plugin_invoke_timeout,
+                              "Per-call timeout in milliseconds (0 = manifest)");
+
+    auto* plugin_check = plugin_cmd->add_subcommand(
+        "check", "Run all enabled T3 check plugins on a JSON input");
+    std::string plugin_check_input, plugin_check_params, plugin_check_id;
+    plugin_check->add_option("input", plugin_check_input, "JSON input file")->required();
+    plugin_check->add_option("--params", plugin_check_params,
+                             "Inline JSON object passed to every check plugin");
+    plugin_check->add_option("--id", plugin_check_id, "Run only this check plugin");
+
+    auto* plugin_new =
+        plugin_cmd->add_subcommand("new", "Scaffold a T3 Python process plugin");
+    std::string plugin_new_id, plugin_new_kind = "check", plugin_new_dir = "plugins";
+    bool plugin_new_force = false;
+    plugin_new->add_option("id", plugin_new_id, "Plugin ID (e.g. acme.check.cps)")->required();
+    plugin_new->add_option("--kind", plugin_new_kind, "Plugin kind")->capture_default_str();
+    plugin_new->add_option("--dir", plugin_new_dir, "Parent directory")
+        ->capture_default_str();
+    plugin_new->add_flag("--force", plugin_new_force, "Overwrite existing files");
 
     // ---- pipeline manifest ----
     auto* run_pipeline_cmd = app.add_subcommand("run", "Execute a validated pipeline manifest");
@@ -645,6 +685,17 @@ int run(int argc, char** argv) {
     if (plugin_list->parsed()) return controller::run_plugin_list();
     if (plugin_validate->parsed())
         return controller::run_plugin_validate(plugin_manifest_path);
+    if (plugin_invoke->parsed())
+        return controller::run_plugin_invoke(plugin_invoke_id, plugin_invoke_method,
+                                             plugin_invoke_kind, plugin_invoke_input,
+                                             plugin_invoke_params, plugin_invoke_out,
+                                             plugin_invoke_timeout);
+    if (plugin_check->parsed())
+        return controller::run_plugin_check(plugin_check_input, plugin_check_params,
+                                            plugin_check_id);
+    if (plugin_new->parsed())
+        return controller::run_plugin_new(plugin_new_id, plugin_new_kind, plugin_new_dir,
+                                          plugin_new_force);
     if (run_pipeline_cmd->parsed()) {
         if (pipeline_model.empty()) pipeline_model = cfg.resolve(cfg.asr_model);
         return controller::run_pipeline(pipeline_path, pipeline_input, pipeline_language,

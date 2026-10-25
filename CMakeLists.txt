@@ -42,6 +42,8 @@ add_library(iris_core
     src/core/pipeline.cpp
     src/core/pipeline_manifest.cpp
     src/core/provider.cpp
+    src/plugin/plugin_manifest.cpp
+    src/plugin/process_plugin.cpp
     src/model/config.cpp
     src/model/time.cpp
     src/model/ir_document.cpp
@@ -155,6 +157,7 @@ add_executable(iris
     src/controller/align_command.cpp
     src/controller/project_command.cpp
     src/controller/pipeline_command.cpp
+    src/controller/plugin_command.cpp
     src/controller/models_command.cpp
     src/controller/serve_command.cpp
     src/controller/script_command.cpp)

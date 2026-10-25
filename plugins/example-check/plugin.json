@@ -1,0 +1,13 @@
+{
+  "id": "example.check.cps",
+  "kind": "check",
+  "version": "0.1.0",
+  "description": "Example T3 check plugin: empty lines, length and characters-per-second",
+  "apiVersion": 1,
+  "protocol": "stdio-jsonl",
+  "command": "python",
+  "args": ["check.py"],
+  "timeoutMs": 5000,
+  "permissions": ["fs:read"],
+  "enabled": true
+}
