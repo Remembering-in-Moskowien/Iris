@@ -378,6 +378,51 @@ TEST_CASE("global sequence alignment skips distant subtitle cues") {
     CHECK(review[0].kind == "unlinked");
 }
 
+TEST_CASE("semantic similarity resolves an ambiguous temporal candidate") {
+    const auto en = make_track({{0, 2000, "A"}, {2000, 4000, "B"}}, "en");
+    const auto zh = make_track({{1000, 3000, "甲"}, {1000, 3000, "乙"}}, "zh");
+
+    subtitle::ReconcileOptions o = options();
+    o.semantic_similarity = [](const std::string& primary, const std::string& secondary) {
+        return (primary == "A" && secondary == "甲") || (primary == "B" && secondary == "乙")
+                   ? 1.0
+                   : 0.0;
+    };
+    o.min_iou = 0.1;
+    o.min_alignment_confidence = 0.55;
+
+    model::Track out;
+    subtitle::ReconcileStats stats;
+    std::vector<subtitle::ReconcileRow> review;
+    std::string error;
+    REQUIRE(subtitle::reconcile(en, zh, o, out, stats, review, error));
+
+    REQUIRE(out.sentences.size() == 2);
+    CHECK(out.sentences[0].translated_text.value_or("") == "甲");
+    CHECK(out.sentences[1].translated_text.value_or("") == "乙");
+    CHECK(stats.alignment_groups == 2);
+    CHECK(stats.alignment_confidence > 0.5);
+}
+
+TEST_CASE("IoU gate rejects a semantically plausible but temporally distant cue") {
+    const auto en = make_track({{0, 1000, "Hello"}}, "en");
+    const auto zh = make_track({{700, 1700, "你好"}}, "zh");
+
+    subtitle::ReconcileOptions o = options();
+    o.min_iou = 0.5;
+
+    model::Track out;
+    subtitle::ReconcileStats stats;
+    std::vector<subtitle::ReconcileRow> review;
+    std::string error;
+    REQUIRE(subtitle::reconcile(en, zh, o, out, stats, review, error));
+
+    REQUIRE(out.sentences.size() == 1);
+    CHECK_FALSE(out.sentences[0].translated_text.has_value());
+    CHECK(stats.alignment_groups == 0);
+    CHECK(stats.unlinked_secondary == 1);
+}
+
 TEST_CASE("syllable weighted even split keeps the total and favours long words") {
     const auto result = text::distribute_even_weighted("a beautiful day", 300);
     REQUIRE_FALSE(result.raw.empty());

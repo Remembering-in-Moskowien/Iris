@@ -71,7 +71,30 @@ must use OCR or an external extractor.
 ## Reconciliation rules
 
 `merge` performs a monotonic global alignment rather than choosing the locally
-largest overlap:
+largest overlap. The alignment path is selected with a constrained
+DTW-style dynamic program. Temporal interval IoU is used as a gate, while
+semantic similarity can disambiguate candidates with similar timing. The
+precision-first default leaves low-confidence candidates unpaired and records
+them in the review report:
+
+```bash
+iris merge episode.en.iris.json episode.zh.iris.json \
+  --min-iou 0.10 \
+  --min-alignment-confidence 0.35 \
+  --report episode.merge.html -o episode.bi.iris.json
+```
+
+Increase either threshold when false positives are more costly than coverage.
+The machine-readable result includes `alignmentGroups`,
+`alignmentRejected`, and `alignmentConfidence`; the HTML report shows the
+same diagnostics alongside split and unlinked rows.
+
+The matcher uses deterministic timing and text-structure features by default.
+Integrations that provide cross-language semantic similarity may supply that
+signal through the reconciliation API; the CLI remains local-first and does
+not download a model implicitly.
+
+The accepted relationship types are:
 
 | Relationship | Result |
 |---|---|

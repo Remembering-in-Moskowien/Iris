@@ -198,6 +198,8 @@ struct MergeOptions {
     int max_lines_en = 2;
     double max_cps_en = 25.0;
     double max_cps_zh = 8.0;
+    double min_iou = 0.10;
+    double min_alignment_confidence = 0.35;
 };
 
 /// merge：英文为主轨、中文为译文轨时的重分段（1:1 / 1:n / n:1 / 单语三档 / 注释）。

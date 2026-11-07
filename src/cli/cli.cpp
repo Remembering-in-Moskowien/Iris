@@ -470,6 +470,12 @@ int run(int argc, char** argv) {
     merge->add_option("--secondary-lang", merge_opts.secondary_language,
                       "Language of the translation track (default: zh)")
         ->capture_default_str();
+    merge->add_option("--min-iou", merge_opts.min_iou,
+                      "Minimum temporal IoU for an alignment candidate (default: 0.10)")
+        ->capture_default_str();
+    merge->add_option("--min-alignment-confidence", merge_opts.min_alignment_confidence,
+                      "Minimum DTW/IoU alignment confidence (default: 0.35)")
+        ->capture_default_str();
     merge->add_option("--single-line", merge_policy,
                       "Single-language policy per category: sdh=keep|drop|glossary,"
                       " interjection=..., dialogue=..., lyric=...");

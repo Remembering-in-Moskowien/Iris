@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -60,6 +61,12 @@ struct ReconcileOptions {
     double max_cps_zh = 8.0;
     int min_split_chars = 3; ///< 切分后每侧至少几个字
     bool keep_annotations = true;
+    /// Optional cross-lingual semantic similarity in [0, 1]. When unset, the
+    /// deterministic structural fallback is used.
+    std::function<double(const std::string&, const std::string&)> semantic_similarity;
+    double semantic_weight = 0.55;
+    double min_iou = 0.10;
+    double min_alignment_confidence = 0.35;
 };
 
 /// 需要人看一眼的问题行。
@@ -86,6 +93,9 @@ struct ReconcileStats {
     int unlinked_secondary = 0;///< 没找到归属、又不是注释的副轨行
     int cps_over_en = 0;
     int cps_over_zh = 0;
+    int alignment_groups = 0;
+    int alignment_rejected = 0;
+    double alignment_confidence = 0.0;
 };
 
 /// 读术语表：`from<TAB>to`，`#` 开头为注释；空行忽略。

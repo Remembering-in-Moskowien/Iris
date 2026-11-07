@@ -113,8 +113,12 @@ iris convert episode.mkv --track lang=chi -o episode.zh.iris.json
 ```
 
 `merge` uses the first input as the event skeleton and performs monotonic
-global reconciliation. It supports 1:1, 1:n, n:1, single-language policies,
-speaker labels, annotations, and glossary-assisted lines. See
+global reconciliation. Candidate groups are filtered by temporal IoU, with
+optional semantic similarity used to disambiguate ambiguous paths; uncertain
+matches are left unpaired for review rather than forced. Use
+`--min-iou` and `--min-alignment-confidence` to tighten the precision-first
+gates. It supports 1:1, 1:n, n:1, single-language policies, speaker labels,
+annotations, and glossary-assisted lines. See
 [docs/bilingual-tracks.md](docs/bilingual-tracks.md).
 
 ### Optional LLM translation post-editing

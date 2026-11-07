@@ -340,6 +340,7 @@ double alignment_cost(const std::vector<Cue>& primary, std::size_t pi, std::size
         coverage += static_cast<double>(covered_duration(primary[i], secondary, si, sn)) /
                     static_cast<double>(duration);
     }
+
     for (std::size_t i = si; i < si + sn; ++i) {
         const auto duration = std::max<std::int64_t>(secondary[i].end - secondary[i].start, 1);
         coverage += static_cast<double>(covered_duration(secondary[i], primary, pi, pn)) /
@@ -392,6 +393,50 @@ double alignment_cost(const std::vector<Cue>& primary, std::size_t pi, std::size
            0.6 * neighboring_coverage;
 }
 
+double interval_iou(const std::vector<Cue>& primary, std::size_t pi, std::size_t pn,
+                    const std::vector<Cue>& secondary, std::size_t si, std::size_t sn) {
+    const auto p = cue_intervals(primary, pi, pn);
+    const auto s = cue_intervals(secondary, si, sn);
+    std::size_t i = 0;
+    std::size_t j = 0;
+    std::int64_t intersection = 0;
+    while (i < p.size() && j < s.size()) {
+        intersection += std::max<std::int64_t>(
+            0, std::min(p[i].second, s[j].second) - std::max(p[i].first, s[j].first));
+        if (p[i].second < s[j].second) ++i;
+        else ++j;
+    }
+    const auto p_len = intervals_length(p);
+    const auto s_len = intervals_length(s);
+    const auto uni = p_len + s_len - intersection;
+    return uni > 0 ? static_cast<double>(intersection) / static_cast<double>(uni) : 0.0;
+}
+
+double fallback_semantic_similarity(const std::vector<Cue>& primary, std::size_t pi,
+                                    std::size_t pn, const std::vector<Cue>& secondary,
+                                    std::size_t si, std::size_t sn) {
+    int p_chars = 0;
+    int s_chars = 0;
+    int p_punct = 0;
+    int s_punct = 0;
+    for (std::size_t i = pi; i < pi + pn; ++i) {
+        p_chars += visible_length(primary[i].text);
+        for (const char c : primary[i].text)
+            p_punct += std::ispunct(static_cast<unsigned char>(c)) != 0;
+    }
+    for (std::size_t i = si; i < si + sn; ++i) {
+        s_chars += visible_length(secondary[i].text);
+        for (const char c : secondary[i].text)
+            s_punct += std::ispunct(static_cast<unsigned char>(c)) != 0;
+    }
+    const double length_score =
+        1.0 - std::min(1.0, std::abs(std::log(static_cast<double>(std::max(p_chars, 1)) /
+                                               static_cast<double>(std::max(s_chars, 1)))));
+    const double punct_score =
+        1.0 - std::min(1.0, std::abs(p_punct - s_punct) / 4.0);
+    return std::clamp(0.7 * length_score + 0.3 * punct_score, 0.0, 1.0);
+}
+
 bool valid_alignment_group(const std::vector<Cue>& primary, std::size_t pi, std::size_t pn,
                            const std::vector<Cue>& secondary, std::size_t si,
                            std::size_t sn) {
@@ -410,6 +455,17 @@ bool valid_alignment_group(const std::vector<Cue>& primary, std::size_t pi, std:
                                                    secondary[i].end - secondary[i].start));
             if (overlap * 100 < shorter_duration * 45) return false;
         }
+        if (sn > 1 && pi + 1 < primary.size()) {
+            const auto& trailing = secondary[si + sn - 1];
+            const auto trailing_duration =
+                std::max<std::int64_t>(1, trailing.end - trailing.start);
+            if (overlap_ms(primary[pi + 1].start, primary[pi + 1].end, trailing.start,
+                           trailing.end) *
+                    100 >=
+                trailing_duration * 45) {
+                return false;
+            }
+        }
     } else if (sn == 1) {
         for (std::size_t i = pi; i < pi + pn; ++i) {
             const auto duration = std::max<std::int64_t>(primary[i].end - primary[i].start, 1);
@@ -424,8 +480,9 @@ bool valid_alignment_group(const std::vector<Cue>& primary, std::size_t pi, std:
     return true;
 }
 
-std::vector<AlignmentGroup> align_cues(const std::vector<Cue>& primary,
-                                       const std::vector<Cue>& secondary) {
+std::vector<AlignmentGroup> align_cues(
+    const std::vector<Cue>& primary, const std::vector<Cue>& secondary,
+    const ReconcileOptions& options, int& rejected, double& confidence_sum) {
     const std::size_t columns = secondary.size() + 1;
     constexpr std::size_t kCostRows = kMaxAlignmentGroup + 1;
     std::vector<double> costs(kCostRows * columns, std::numeric_limits<double>::infinity());
@@ -483,8 +540,36 @@ std::vector<AlignmentGroup> align_cues(const std::vector<Cue>& primary,
             for (std::size_t pn = 1; pn <= max_primary; ++pn) {
                 for (std::size_t sn = 1; sn <= max_secondary; ++sn) {
                     if (!valid_alignment_group(primary, i, pn, secondary, j, sn)) continue;
+                    const double iou = interval_iou(primary, i, pn, secondary, j, sn);
+                    if (iou < options.min_iou) {
+                        ++rejected;
+                        continue;
+                    }
+                    double semantic = fallback_semantic_similarity(primary, i, pn, secondary, j, sn);
+                    if (options.semantic_similarity) {
+                        double sum = 0.0;
+                        int count = 0;
+                        for (std::size_t pi = i; pi < i + pn; ++pi) {
+                            for (std::size_t si = j; si < j + sn; ++si) {
+                                sum += std::clamp(options.semantic_similarity(primary[pi].text,
+                                                                               secondary[si].text),
+                                                  0.0, 1.0);
+                                ++count;
+                            }
+                        }
+                        if (count > 0) semantic = sum / static_cast<double>(count);
+                    }
+                    const double confidence = 0.65 * iou + 0.35 * semantic;
+                    if (options.semantic_similarity &&
+                        confidence < options.min_alignment_confidence) {
+                        ++rejected;
+                        continue;
+                    }
                     relax(i, j, i + pn, j + sn,
-                          alignment_cost(primary, i, pn, secondary, j, sn),
+                          alignment_cost(primary, i, pn, secondary, j, sn) +
+                              (options.semantic_similarity
+                                   ? options.semantic_weight * (1.0 - semantic)
+                                   : 0.0),
                           static_cast<std::uint8_t>(3 + (pn - 1) * kMaxAlignmentGroup + sn - 1));
                 }
             }
@@ -513,6 +598,28 @@ std::vector<AlignmentGroup> align_cues(const std::vector<Cue>& primary,
         }
     }
     std::reverse(groups.begin(), groups.end());
+    for (const auto& group : groups) {
+        const double iou = interval_iou(primary, group.primary, group.primary_count, secondary,
+                                         group.secondary, group.secondary_count);
+        double semantic = fallback_semantic_similarity(
+            primary, group.primary, group.primary_count, secondary, group.secondary,
+            group.secondary_count);
+        if (options.semantic_similarity) {
+            double sum = 0.0;
+            int count = 0;
+            for (std::size_t pi = group.primary; pi < group.primary + group.primary_count; ++pi) {
+                for (std::size_t si = group.secondary;
+                     si < group.secondary + group.secondary_count; ++si) {
+                    sum += std::clamp(
+                        options.semantic_similarity(primary[pi].text, secondary[si].text), 0.0,
+                        1.0);
+                    ++count;
+                }
+            }
+            if (count > 0) semantic = sum / static_cast<double>(count);
+        }
+        confidence_sum += 0.65 * iou + 0.35 * semantic;
+    }
     return groups;
 }
 
@@ -1099,7 +1206,13 @@ bool reconcile(const model::Track& primary, const model::Track& secondary,
     std::stable_sort(S.begin(), S.end(), cue_order);
 
     // DP globally chooses monotonic cue groups; only these selected groups can claim cues.
-    const auto groups = align_cues(P, S);
+    int rejected_alignments = 0;
+    double confidence_sum = 0.0;
+    const auto groups = align_cues(P, S, options, rejected_alignments, confidence_sum);
+    stats.alignment_groups = static_cast<int>(groups.size());
+    stats.alignment_rejected = rejected_alignments;
+    stats.alignment_confidence =
+        groups.empty() ? 0.0 : confidence_sum / static_cast<double>(groups.size());
     for (const auto& group : groups) {
         if (group.primary_count == 1) {
             Cue& p = P[group.primary];

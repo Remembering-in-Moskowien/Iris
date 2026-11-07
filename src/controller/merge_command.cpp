@@ -198,6 +198,9 @@ std::string render_report(const std::string& primary_path, const std::string& se
          << "<div>译文拆分 " << stats.split_secondary << "</div>"
          << "<div>切分失败 " << stats.split_failed << "</div>"
          << "<div>英文合并 " << stats.english_merged << "</div>"
+         << "<div>DTW 配对组 " << stats.alignment_groups << "</div>"
+         << "<div>IoU/语义拒绝 " << stats.alignment_rejected << "</div>"
+         << "<div>平均置信度 " << stats.alignment_confidence << "</div>"
          << "<div>单语保留 " << stats.kept << "</div>"
          << "<div>单语丢弃 " << stats.dropped << "</div>"
          << "<div>术语补译 " << stats.glossed << "</div>"
@@ -283,6 +286,8 @@ int run_merge(const std::string& primary_path, const std::string& secondary_path
     ro.max_lines_en = options.max_lines_en;
     ro.max_cps_en = options.max_cps_en;
     ro.max_cps_zh = options.max_cps_zh;
+    ro.min_iou = options.min_iou;
+    ro.min_alignment_confidence = options.min_alignment_confidence;
 
     model::Track merged;
     subtitle::ReconcileStats stats;
@@ -349,6 +354,9 @@ int run_merge(const std::string& primary_path, const std::string& secondary_path
                                  {"glossed", stats.glossed},
                                  {"annotations", stats.secondary_only},
                                  {"unlinked", stats.unlinked_secondary},
+                                 {"alignmentGroups", stats.alignment_groups},
+                                 {"alignmentRejected", stats.alignment_rejected},
+                                 {"alignmentConfidence", stats.alignment_confidence},
                                  {"cpsOverZh", stats.cps_over_zh},
                                  {"cpsOverEn", stats.cps_over_en},
                                  {"report", options.report_path}})
