@@ -5,11 +5,13 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
 
 #include "iris/subtitle/ass_script.hpp"
+#include "iris/infra/paths.hpp"
 
 namespace iris::view {
 
@@ -85,6 +87,43 @@ void append_missing_styles(AssScript& script, const model::WorkflowState& state)
     }
 }
 
+bool requests_tadc_theme(const model::IrDocument& doc) {
+    const auto is_tadc_name = [](const std::string& style) {
+        return style.find("Pomni") != std::string::npos ||
+               style.find("Caine") != std::string::npos ||
+               style.find("Ragatha") != std::string::npos ||
+               style.find("Zooble") != std::string::npos ||
+               style.find("Kinger") != std::string::npos ||
+               style.find("Gangle") != std::string::npos ||
+               style.find("Bubble") != std::string::npos ||
+               style.find("Kaufmo") != std::string::npos;
+    };
+    for (const auto& style : doc.state.styles) {
+        if (is_tadc_name(style.name)) return true;
+    }
+    for (const auto& track : doc.state.tracks) {
+        for (const auto& sentence : track.sentences) {
+            if (!sentence.style) continue;
+            if (is_tadc_name(*sentence.style)) return true;
+        }
+    }
+    return false;
+}
+
+std::string discover_style_sheet(const model::IrDocument& doc) {
+    if (!requests_tadc_theme(doc)) return {};
+    const std::vector<fs::path> candidates = {
+        fs::path(infra::executable_dir()) / "themes" / "tadc.json",
+        fs::current_path() / "themes" / "tadc.json",
+        fs::current_path() / "docs" / "themes" / "tadc.json",
+    };
+    std::error_code ec;
+    for (const auto& path : candidates) {
+        if (fs::exists(path, ec)) return infra::path_to_utf8(path);
+    }
+    return {};
+}
+
 bool parse_template_json(const std::string& content, AssScript& out, std::string& error) {
     nlohmann::json j = nlohmann::json::parse(content, nullptr, false);
     if (j.is_discarded() || !j.is_object()) {
@@ -99,7 +138,30 @@ bool parse_template_json(const std::string& content, AssScript& out, std::string
         }
     }
     if (j.contains("styles") && j["styles"].is_array()) {
-        for (const auto& s : j["styles"]) out.styles.push_back(AssStyle::from_json(s));
+        // 支持 "extends"：角色样式只写与基础样式不同的字段（典型是主色），
+        // 免得一个 9 人剧组把 23 列样式表抄 18 遍。
+        std::map<std::string, nlohmann::json> raw;
+        std::vector<std::string> order;
+        for (const auto& s : j["styles"]) {
+            if (!s.is_object() || !s.contains("name") || !s["name"].is_string()) continue;
+            const std::string name = s["name"].get<std::string>();
+            if (raw.find(name) == raw.end()) order.push_back(name);
+            raw[name] = s;
+        }
+        std::function<nlohmann::json(const std::string&, int)> resolve =
+            [&](const std::string& name, int depth) -> nlohmann::json {
+            const auto it = raw.find(name);
+            if (it == raw.end() || depth > 8) return nlohmann::json::object();
+            const nlohmann::json& self = it->second;
+            if (!self.contains("extends") || !self["extends"].is_string()) return self;
+            nlohmann::json base = resolve(self["extends"].get<std::string>(), depth + 1);
+            if (!base.is_object()) return self;
+            for (const auto& [key, value] : self.items()) base[key] = value;
+            return base;
+        };
+        for (const auto& name : order) {
+            out.styles.push_back(AssStyle::from_json(resolve(name, 0)));
+        }
     }
     if (out.styles.empty()) {
         error = "模板里没有 styles";
@@ -198,6 +260,7 @@ AssScript default_ass_template() {
         e.margin_v = 880;
         s.styles.push_back(e);
     }
+
     return s;
 }
 
@@ -233,8 +296,13 @@ bool build_ass(const model::IrDocument& doc, const AssBuildOptions& options, Ass
     }
 
     AssScript script;
-    if (!options.template_path.empty()) {
-        if (!load_ass_template(options.template_path, script, error)) return false;
+    const std::string style_path = !options.style_sheet_path.empty()
+                                       ? options.style_sheet_path
+                                       : options.template_path.empty()
+                                           ? discover_style_sheet(doc)
+                                           : options.template_path;
+    if (!style_path.empty()) {
+        if (!load_ass_template(style_path, script, error)) return false;
         script.events.clear(); // 模板只取 Script Info + 样式
     } else if (!doc.state.styles.empty()) {
         script.info = doc.state.script_info;
@@ -250,7 +318,7 @@ bool build_ass(const model::IrDocument& doc, const AssBuildOptions& options, Ass
     if (script.play_res_y() <= 0) script.set_info("PlayResY", "1080");
     if (!options.title.empty()) script.set_info("Title", options.title);
 
-    if (!options.template_path.empty()) append_missing_styles(script, doc.state);
+    if (!style_path.empty()) append_missing_styles(script, doc.state);
     scale_script(script, options.scale);
 
     const std::string language = !track->language.empty() ? track->language : doc.config.language;

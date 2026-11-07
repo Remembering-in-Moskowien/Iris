@@ -42,6 +42,10 @@ bool project_translation(const std::string& source_raw, const std::string& targe
 /// 无源节奏时按 token 均分整行。
 KaraokeResult distribute_even(const std::string& text, int total_cs);
 
+/// 无源节奏时按「音节权重」分配整行：英文按元音组估音节、中文按字。
+/// 歌词没有词级时间时用这个，比逐词均分更贴演唱节奏。
+KaraokeResult distribute_even_weighted(const std::string& text, int total_cs);
+
 /// 词级时间（align 产物）：每个 token 的绝对起止（秒）。
 struct TimedToken {
     std::string text;

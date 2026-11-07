@@ -135,6 +135,7 @@ nlohmann::json Sentence::to_json() const {
     if (style) j["style"] = *style;
     if (raw) j["raw"] = *raw;
     if (translated_raw) j["translatedRaw"] = *translated_raw;
+    if (role) j["role"] = *role;
     if (layer != 0) j["layer"] = layer;
     if (comment) j["comment"] = true;
     if (!words.empty()) {
@@ -154,6 +155,7 @@ Sentence Sentence::from_json(const nlohmann::json& j) {
     set_opt(j, "style", s.style);
     set_opt(j, "raw", s.raw);
     set_opt(j, "translatedRaw", s.translated_raw);
+    set_opt(j, "role", s.role);
     s.layer = j.value("layer", 0);
     s.comment = j.value("comment", false);
     if (j.contains("words") && j["words"].is_array()) {
@@ -272,10 +274,10 @@ IrDocument IrDocument::load(const std::string& path) {
     return from_json(j);
 }
 
-void IrDocument::save(const std::string& path) const {
+void IrDocument::save(const std::string& path, int indent) const {
     std::ofstream out(infra::utf8_path(path), std::ios::binary);
     if (!out) throw std::runtime_error("无法写入 IR 文件: " + path);
-    out << dump(2) << '\n';
+    out << dump(indent) << '\n';
 }
 
 // ---------------------------------------------------------------------------

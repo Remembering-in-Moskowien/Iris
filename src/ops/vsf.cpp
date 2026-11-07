@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <cmath>
 #include <deque>
+#include <numeric>
 #include <iostream>
 #include <map>
 
 #include "iris/infra/log.hpp"
 #include "iris/infra/pipe_reader.hpp"
 #include "iris/infra/process.hpp"
+#include "iris/vsf/vsf_api.h"
 
 namespace iris::ops {
 namespace {
@@ -135,6 +137,15 @@ double fraction_nonzero(const std::vector<unsigned char>& b) {
     return static_cast<double>(c) / b.size();
 }
 
+struct FrameEvidence {
+    double time = 0.0;
+    double score = 0.0;
+};
+
+FrameEvidence subtitle_evidence(const unsigned char* rgb, int w, int h, double time) {
+    return {time, iris_vsf_score_rgb(rgb, w, h)};
+}
+
 } // namespace
 
 std::vector<VsfSegment> run_vsf(const std::string& video_path,
@@ -170,29 +181,24 @@ std::vector<VsfSegment> run_vsf(const std::string& video_path,
     }
     spdlog::info("vsf: {}x{} ROI={},{},{},{} 采样 {} fps", W, H, rx, ry, rw, rh, sample_fps);
 
-    // 2. 启动 ffmpeg 抽帧
+    if (sample_fps <= 0.0) sample_fps = 0.5;
+
+    // 2. 启动 ffmpeg 抽帧。直接裁剪 ROI，避免把整帧复制到用户态。
     infra::StreamProcess proc;
     if (!proc.start({"ffmpeg", "-hide_banner", "-loglevel", "error",
                      "-i", video_path,
-                     "-vf", "fps=" + std::to_string(sample_fps),
+                     "-vf", "fps=" + std::to_string(sample_fps) +
+                                ",crop=" + std::to_string(rw) + ":" +
+                                std::to_string(rh) + ":" + std::to_string(rx) + ":" +
+                                std::to_string(ry),
                      "-f", "rawvideo", "-pix_fmt", "rgb24", "-"})) {
         spdlog::error("vsf: 无法启动 ffmpeg");
         return out;
     }
 
-    const std::size_t frame_bytes = static_cast<std::size_t>(W) * H * 3;
+    const std::size_t frame_bytes = static_cast<std::size_t>(rw) * rh * 3;
     std::vector<unsigned char> frame(frame_bytes);
-
-    // 时序聚合：时间窗口（秒），采样率无关
-    struct Sample { bool has; double t; };
-    std::deque<Sample> window;
-    const double window_sec = 2.0;     // 时间窗
-    const double min_span_sec = 1.0;   // 窗内需覆盖至少 1 秒
-    const int min_hits = 2;            // 窗内至少 2 帧有字幕
-
-    // 段构建
-    bool active = false;
-    VsfSegment cur;
+    std::vector<FrameEvidence> evidence;
 
     int frame_idx = 0;
     while (true) {
@@ -202,57 +208,68 @@ std::vector<VsfSegment> run_vsf(const std::string& video_path,
         const double t = frame_idx / sample_fps;
         ++frame_idx;
 
-        // 裁剪 ROI（拷贝子区域）
-        std::vector<unsigned char> roi(static_cast<std::size_t>(rw) * rh * 3);
-        for (int y = 0; y < rh; ++y) {
-            std::copy_n(frame.data() + ((ry + y) * W + rx) * 3,
-                        static_cast<std::size_t>(rw) * 3,
-                        roi.begin() + static_cast<std::size_t>(y) * rw * 3);
-        }
+        evidence.push_back(subtitle_evidence(frame.data(), rw, rh, t));
+        spdlog::debug("vsf t={:.2f} score={:.3f}", t, evidence.back().score);
+    }
 
-        // 四信号
-        auto gray = to_gray(roi.data(), rw, rh);
-        auto bright = threshold(gray, 200);
-        auto yellow = yellow_mask(roi.data(), rw, rh);
-        const double sBright = fraction_nonzero(bright);
-        const double sYellow = fraction_nonzero(yellow);
-        const double sEdge = edge_density(gray, rw, rh);
-        const double sBlob = text_blob_score(bright, rw, rh);
+    if (evidence.empty()) return out;
 
-        const double score =
-            0.30 * std::min(sBright * 5.0, 1.0) +
-            0.20 * std::min(sYellow * 8.0, 1.0) +
-            0.25 * std::min(sEdge * 4.0, 1.0) +
-            0.25 * std::min(sBlob * 6.0, 1.0);
-        const bool has = score > score_threshold;
+    std::vector<double> scores;
+    scores.reserve(evidence.size());
+    for (const auto& e : evidence) scores.push_back(e.score);
+    std::vector<double> sorted = scores;
+    std::sort(sorted.begin(), sorted.end());
+    const double median = sorted[sorted.size() / 2];
+    std::vector<double> deviations;
+    deviations.reserve(sorted.size());
+    for (double s : scores) deviations.push_back(std::abs(s - median));
+    std::sort(deviations.begin(), deviations.end());
+    const double mad = deviations[deviations.size() / 2];
+    const double lower_quartile = sorted[sorted.size() / 4];
+    const double adaptive_threshold =
+        std::max(score_threshold, std::min(0.72, lower_quartile + std::max(0.035, mad * 1.2)));
+    spdlog::debug("vsf: median={:.3f} mad={:.3f} threshold={:.3f}",
+                  median, mad, adaptive_threshold);
 
-        window.push_back({has, t});
-        while (!window.empty() && t - window.front().t > window_sec) window.pop_front();
-
-        bool stable = false;
-        if (!window.empty()) {
-            const double span = window.back().t - window.front().t;
-            int hits = 0;
-            for (const auto& s : window) if (s.has) ++hits;
-            stable = span >= min_span_sec && hits >= min_hits;
-        }
-
-        spdlog::debug("vsf t={:.2f} score={:.3f} has={} stable={}", t, score, has, stable);
-
-        if (stable && has) {
-            if (!active) {
-                active = true;
-                cur = VsfSegment{t, t, score, rx, ry, rw, rh};
+    const double step = 1.0 / sample_fps;
+    const double pad = std::max(0.15, step * 0.75);
+    const int min_on = std::max(1, static_cast<int>(std::ceil(0.35 / step)));
+    const int max_gap = std::max(1, static_cast<int>(std::ceil(0.55 / step)));
+    int run_start = -1;
+    int last_on = -1;
+    int consecutive_on = 0;
+    double confidence = 0.0;
+    for (int i = 0; i < static_cast<int>(evidence.size()); ++i) {
+        const bool on = evidence[static_cast<std::size_t>(i)].score >= adaptive_threshold;
+        if (on) {
+            if (run_start < 0 && ++consecutive_on >= min_on) {
+                run_start = i - min_on + 1;
             }
-            cur.end_sec = t;
-            cur.confidence = std::max(cur.confidence, score);
-        } else if (active && !has) {
-            // 段结束（最小时长 0.3s 过滤）
-            if (cur.end_sec - cur.start_sec >= 0.3) out.push_back(cur);
-            active = false;
+            if (run_start >= 0) {
+                last_on = i;
+                confidence = std::max(confidence, evidence[static_cast<std::size_t>(i)].score);
+            }
+        } else {
+            consecutive_on = 0;
+            if (run_start >= 0 && i - last_on > max_gap) {
+                const double start = std::max(0.0, evidence[static_cast<std::size_t>(run_start)].time - pad);
+                const double end = evidence[static_cast<std::size_t>(last_on)].time + pad;
+                if (end - start >= 0.35) {
+                    out.push_back(VsfSegment{start, end, confidence, rx, ry, rw, rh});
+                }
+                run_start = -1;
+                last_on = -1;
+                confidence = 0.0;
+            }
         }
     }
-    if (active && cur.end_sec - cur.start_sec >= 0.3) out.push_back(cur);
+    if (run_start >= 0 && last_on >= run_start) {
+        const double start = std::max(0.0, evidence[static_cast<std::size_t>(run_start)].time - pad);
+        const double end = evidence[static_cast<std::size_t>(last_on)].time + pad;
+        if (end - start >= 0.35) {
+            out.push_back(VsfSegment{start, end, confidence, rx, ry, rw, rh});
+        }
+    }
 
     spdlog::info("vsf: 检测到 {} 个字幕段", out.size());
     return out;

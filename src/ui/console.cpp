@@ -385,11 +385,11 @@ void json_out(const std::string& body) {
 
 std::string bold(const std::string& s) { return paint("1", s); }
 std::string dim(const std::string& s) { return paint("90", s); }
-std::string green(const std::string& s) { return paint("32", s); }
+std::string green(const std::string& s) { return s; }
 std::string red(const std::string& s) { return paint("1;31", s); }
 std::string yellow(const std::string& s) { return paint("33", s); }
-std::string cyan(const std::string& s) { return paint("36", s); }
-std::string magenta(const std::string& s) { return paint("1;35", s); }
+std::string cyan(const std::string& s) { return dim(s); }
+std::string magenta(const std::string& s) { return red(s); }
 
 SgrState parse_sgr(const std::string& params, SgrState base) {
     SgrState state = base;

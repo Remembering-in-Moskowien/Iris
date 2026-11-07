@@ -9,6 +9,7 @@
 #include "iris/project/project.hpp"
 #include "iris/quality/ass_lint.hpp"
 #include "iris/view/ass_builder.hpp"
+#include "iris/llm/scheduler.hpp"
 
 namespace iris::controller {
 
@@ -37,6 +38,7 @@ int run_build(const std::string& ir_path, const std::string& format, const std::
 
 /// validate：校验 IR 文件。
 int run_validate(const std::string& ir_path);
+int run_compact(const std::string& ir_path, const std::string& out_path);
 
 /// doctor：环境诊断（外部媒体工具 + 内嵌 ASR/TTS 后端可用性）。
 int run_doctor();
@@ -109,6 +111,7 @@ struct TranslateCommandOptions {
     std::string asr_model;
     int beam_size = 5;
     int max_tokens = 256;
+    llm::Options llm;
 };
 
 /// translate：机器翻译（非 LLM：OPUS-MT/Marian、M2M100）。
@@ -162,15 +165,44 @@ int run_style_extract(const std::string& ass_path, const std::string& out_json,
                       const std::string& name);
 
 /// karaoke：按源行 \K 节奏投影译文（或同码兄弟行），生成逐字 \K。
+/// even_syllables=true 时兜底均分按音节加权；only_role 非空时只处理该角色（如 lyric）。
 int run_karaoke(const std::string& ir_path, const std::string& out_path, bool fill_even,
-                bool overwrite, int tolerance_ms);
+                bool overwrite, int tolerance_ms, bool even_syllables = false,
+                const std::string& only_role = {});
 
 /// ocr：从视频硬字幕提取文本 → IR（vsf 找字幕段 + PP-OCR 识别）。
 int run_ocr(const OcrCommandOptions& options);
 
-/// convert：单个字幕文件（SRT/ASS/VTT）→ IR。
+/// convert：单个字幕文件（SRT/ASS/VTT）→ IR；也可以直接吃容器（MKV/MP4），
+/// 用 --track 选一条内封字幕轨（索引 / lang=chi / title=SDH）先抽后导。
 int run_convert(const std::vector<std::string>& inputs, const std::string& language,
-                const std::string& out_path);
+                const std::string& out_path, const std::string& track_selector = {});
+
+/// tracks：列出容器里的流（字幕轨的语言/标题/默认标志），只读。
+int run_tracks(const std::string& media);
+
+/// merge：两条字幕（IR 或字幕文件）→ 一条双语 IR（重分段）。
+struct MergeOptions {
+    std::string primary_language = "en";
+    std::string secondary_language = "zh";
+    std::string policy_sdh = "keep";          ///< keep | drop | glossary
+    std::string policy_interjection = "keep";
+    std::string policy_dialogue = "keep";
+    std::string policy_lyric = "keep";
+    std::string glossary_path;
+    std::string report_path;                  ///< HTML 复核报告（可空）
+    std::string split_strategy = "rule";     ///< rule | sat（对主副轨做可选语义分句）
+    std::string split_model = "models/sat";  ///< SaT 模型目录
+    bool allow_english_merge = true;
+    int max_chars_en = 42;
+    int max_lines_en = 2;
+    double max_cps_en = 25.0;
+    double max_cps_zh = 8.0;
+};
+
+/// merge：英文为主轨、中文为译文轨时的重分段（1:1 / 1:n / n:1 / 单语三档 / 注释）。
+int run_merge(const std::string& primary_path, const std::string& secondary_path,
+              const std::string& out_path, const MergeOptions& options);
 
 /// combine：多个字幕文件 → IR（同一语言拼接去重；--bilingual 时第二份作为译文对齐）。
 /// text_mode=true 时第二份按「纯文本，一行一条」处理，并按行序配对（不做时间重叠匹配）。

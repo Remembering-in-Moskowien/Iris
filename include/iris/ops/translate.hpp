@@ -5,6 +5,7 @@
 
 #include "iris/core/operator.hpp"
 #include "iris/mt/translator.hpp"
+#include "iris/llm/scheduler.hpp"
 
 namespace iris::ops {
 
@@ -18,6 +19,7 @@ class Translate : public core::Operator {
 public:
     struct Options {
         mt::TranslateOptions mt;
+        llm::Options llm;
         bool after_asr = true; ///< 上游是否挂了 asr 链路（决定 DAG 依赖）
     };
 

@@ -54,7 +54,7 @@ int run_build(const std::string& ir_path, const std::string& format, const std::
         }
         std::ofstream os(out_path, std::ios::binary);
         if (!os) {
-            spdlog::error("build: 无法写入 {}", out_path.string());
+            spdlog::error("build: 无法写入 {}", infra::path_to_utf8(out_path));
             return 1;
         }
         os << result.text;
@@ -89,23 +89,25 @@ int run_build(const std::string& ir_path, const std::string& format, const std::
         const std::string body = view::render_subtitles(sd, fmt);
         std::ofstream os(out_path, std::ios::binary);
         if (!os) {
-            spdlog::error("build: 无法写入 {}", out_path.string());
+            spdlog::error("build: 无法写入 {}", infra::path_to_utf8(out_path));
             return 1;
         }
         os << body;
         lines = static_cast<int>(sd.lines.size());
     }
 
-    spdlog::info("build: 已生成 {}（{} 行）", out_path.string(), lines);
+    const std::string out_path_utf8 = infra::path_to_utf8(out_path);
+    spdlog::info("build: 已生成 {}（{} 行）", out_path_utf8, lines);
     ui::json_out(nlohmann::json({{"ok", true},
                                  {"command", "build"},
                                  {"ir", ir_path},
-                                 {"output", out_path.string()},
+                                 {"output", out_path_utf8},
                                  {"format", format},
                                  {"lines", lines},
                                  {"translatedLines", translated},
                                  {"bilingual", options.bilingual},
-                                 {"template", options.template_path}})
+                                 {"template", options.template_path},
+                                 {"styleSheet", options.style_sheet_path}})
                      .dump(2));
     return 0;
 }

@@ -24,6 +24,7 @@ struct AlignOptions {
     int threads = 0;       ///< 0 = 自动（min(8, 核数)）
     double pad_seconds = 0.2; ///< 每句前后各留一点音频，避免切掉首尾音
     bool dry_run = false;  ///< 只解码 + 报区间，不跑模型
+    bool apply_sentence_timings = false; ///< 用有效词级时间覆盖句子起止时间
 };
 
 struct AlignStats {
@@ -45,6 +46,9 @@ bool decode_media_16k(const std::string& media, std::vector<float>& pcm, std::st
 /// 单句在音频里的取样区间（秒）；会把 pad 夹到 [0, total]。
 AudioRange sentence_range(std::int64_t start_ms, std::int64_t end_ms, std::int64_t total_ms,
                           double pad_seconds);
+
+/// 用有效词级时间更新句子边界；无有效跨度时保持原值并返回 false。
+bool apply_word_timings_to_sentence(model::Sentence& sentence, std::int64_t total_ms);
 
 /// 给一个轨道逐句对齐（写 sentence.words）；失败返回 false 并给 error。
 bool align_track(model::Track& track, const std::vector<float>& pcm, int sample_rate,

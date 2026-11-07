@@ -1,92 +1,116 @@
-# iris 架构
+# Iris architecture
 
-## 总览
+## Overview
 
-iris 是 Centurion（C#）的 C++ 迁移，保留 operator-pipeline（DAG）架构：
-管线由独立、可替换的操作符组成，操作符声明依赖边，执行器拓扑排序后按序运行。
-每个阶段的结果沉淀到**版本化中间文件**（`*.iris.json`，即 IR），
-后续命令只消费 IR，形成可断点恢复的命令链。
+Iris is a C++20, local-first media pipeline. Commands convert media or
+subtitle sources into a versioned `*.iris.json` document; later commands
+consume that document without repeating expensive work.
 
-```
-媒体输入
-   │
-   ▼
-┌─────────────────────────────────────────────────────────┐
-│ Pipeline (DAG 执行器)                                    │
-│  FfmpegConvert → AudioPreprocess → Transcribe →          │
-│  SentenceSplit → (…)                                    │
-└─────────────────────────────────────────────────────────┘
-   │
-   ▼
-IR (*.iris.json) ──► build ──► ASS / SRT / TXT
+```text
+media / subtitles / script / hard subtitles
+                  |
+       convert -> transcribe -> split
+                  |
+              IR 1.0
+                  |
+ correct -> translate -> align -> karaoke -> build / quality / dub
 ```
 
-## 分层
+The declarative pipeline runner uses the same operations as the CLI and
+executes a validated DAG. The ordinary commands remain available for
+interactive and incremental work.
 
-```
-┌────────────────────────────────────────────────┐
-│ cli    命令分发（CLI11）                        │
-├────────────────────────────────────────────────┤
-│ ops    具体操作符（业务阶段）                   │
-├────────────────────────────────────────────────┤
-│ core   引擎：Pipeline / Operator / Provider    │
-├────────────────────────────────────────────────┤
-│ model  数据模型 + IR 契约（nlohmann::json）     │
-├────────────────────────────────────────────────┤
-│ infra  子进程、日志等基础设施             │
-└────────────────────────────────────────────────┘
-```
+## Layers
 
-## 核心抽象
+| Layer | Responsibility |
+|---|---|
+| `cli` | CLI11 command declarations and dispatch |
+| `controller` | Command orchestration, validation, result output |
+| `ops` | Pipeline operations such as conversion, transcription, OCR, and build |
+| `core` | Operators, pipeline execution, providers, and extension registries |
+| `model` | IR data model, JSON serialization, configuration |
+| `view` | ASS/SRT/TXT rendering and style handling |
+| `infra` | Processes, UTF-8 paths, logging, runtime detection |
+| `ui` | Console presentation, agent mode, JSON mode, progress |
 
-### Operator（操作符）
+## Core abstractions
 
-```cpp
-class Operator {
-    virtual std::string name() const = 0;                 // 唯一标识，写入 provenance
-    virtual std::vector<std::string> dependencies() const; // DAG 边
-    virtual bool execute(PipelineContext& ctx) = 0;        // 阶段逻辑
-};
-```
+### Operators and pipelines
 
-### Pipeline（DAG 执行器）
+An operator has a stable name, declared dependencies, and an execution
+function. The pipeline runner validates missing dependencies and cycles, then
+performs a topological execution. Each node declares input/output facets so a
+manifest cannot consume an artifact that no ancestor produces.
 
-- `add(op)` 注册操作符（允许重复名称？——不，名称唯一，重复注册视为同名合并）。
-- `run(ctx)`：Kahn 拓扑排序 → 按序执行；依赖缺失或存在环则失败；任一操作符失败即中止。
-- 并行分支（C# 版支持）在后续版本引入（`std::execution` / 线程池）。
+Parallel execution is not assumed: operations that use CPU inference or
+external tools must preserve deterministic ordering and explicit resource
+limits.
 
-### Provider（提供者）
+### Extensions and providers
 
-本地优先、云兜底的推理抽象：ASR / OCR / LLM / TTS / Diarization / VocalSeparation
-各定义接口。当前 `ProviderRegistry` 管理展示用的提供者元数据；实际 ASR/TTS 后端与字幕渲染格式由类型化扩展注册表选择和分发。
+ASR, TTS, and render implementations use typed static extension registries.
+Each registration contains a canonical ID, aliases, runtime availability, and
+the type-safe factory or execution entry point. `iris plugin list` reads these
+same registrations, so discovery and execution cannot silently diverge.
 
-### 内置扩展与插件边界
+`ProviderRegistry` remains a metadata catalog. It is not the runtime dispatch
+mechanism. T3 process plugins are a separate boundary and communicate over
+stdio JSON Lines. Discovery, validation, invocation, and scaffold generation
+are implemented; manifests do not grant capabilities. T2 dynamic-library
+plugin loading, package signing/verification, and OS-level sandboxing are not
+provided.
 
-ASR、TTS 与字幕渲染器的内置实现在 Iris 编译时静态注册。注册项包含规范 ID、CLI 别名、构建运行时可用性及类型安全的执行/会话工厂；名称解析、可用性查询和执行分发使用同一注册项，避免元数据与实际执行路径各自维护一份枚举分支。`core::ExtensionRegistry<T>` 会拒绝空 ID、空别名及重复 ID/别名，`iris plugin list` 直接枚举这些注册项。
+## IR 1.0
 
-当前扩展边界包含随 Iris 编译的静态内置实现，以及从 `plugins/` 目录按 `plugin.json` 启动的 T3 独立进程插件。进程插件通过 stdin/stdout 的逐行 JSON 通信，宿主不加载其代码；T2 C ABI 动态库加载、插件签名/安装和 OS 级权限沙箱仍未实现。Pipeline JSON 编排仍由静态内置操作符实现，支持 DAG/facet 校验、渲染与 ASS lint。
-
-### IR 契约（*.iris.json v1.0）
+The root document contains:
 
 ```json
 {
   "schemaVersion": "1.0",
-  "generator": { "tool": "iris", "version": "...", "command": "asr", "generatedAt": "..." },
-  "provenance": [ { "operator": "transcribe", "model": "crispasr", "parametersHash": "..." } ],
-  "config":   { "inputFilePath": "...", "language": "en", "transcriberEngine": "whisper", "..." },
-  "state":    { "convertedAudioPath": "...", "tracks": [ { "type": "transcribe", "sentences": [...] } ] }
+  "generator": {},
+  "provenance": [],
+  "config": {},
+  "state": {
+    "tracks": [
+      {
+        "type": "transcribe",
+        "language": "en",
+        "sentences": [
+          { "startMs": 0, "endMs": 1200, "text": "Hello." }
+        ]
+      }
+    ]
+  }
 }
 ```
 
-字段名与 C# 版 `*.centurion.json` 保持一致，保证未来可互相 `migrate`。
+Sentence timing is stored in milliseconds. Optional words use seconds for
+compatibility with the ASR and forced-aligner APIs. Sentence fields include
+`translatedText`, `speaker`, `style`, `raw`, `translatedRaw`, `role`, `layer`,
+and `comment`. Workflow state also stores styles, script information, timeline
+offset, and generated audio paths.
 
-## 关键设计决策
+New fields are additive and old IR files remain readable when fields are
+missing. `provenance` records the operation, model, parameters hash, and
+timestamp needed to audit a generated artifact.
 
-| 决策 | 理由 |
-|---|---|
-| ASR 推理内嵌进本体（CrispASR / CTranslate2） | 不依赖外部 ASR 可执行文件（whisper-cli 等），模型与推理代码随 iris 一起构建，进程内完成转写 |
-| ffmpeg / VSF 等媒体工具保留子进程调用 | 媒体解码/取帧工具链成熟，避免绑定原生库的构建复杂度（与 C# 版一致） |
-| 依赖用 CMake FetchContent 锁版本 | 可复现构建；CI 与本地一致 |
-| IR 作为唯一交换契约 | 命令链可断点恢复；provenance 可审计 |
-| Result<T> 替代异常传播 | 命令式错误处理，便于 CLI 层统一报错与退出码 |
-| 时间码统一毫秒存储 | ASS（百分秒）与 SRT（毫秒）双向无损转换 |
+## Timing boundaries
+
+ASR supplies the primary sentence timeline. Forced alignment may refine those
+boundaries only when aligned word spans are valid, non-zero, and not
+implausibly compressed. The VSF hard-subtitle detector is different: it
+produces a visual timing envelope from sampled frames. VSF does not infer
+speech or text and must not overwrite ASR sentence boundaries without a
+separate reconciliation step.
+
+## Platform decisions
+
+- FFmpeg/FFprobe remain subprocess dependencies for media decoding and frame
+  extraction.
+- Windows filesystem and child-process paths use UTF-8 conversion helpers;
+  direct construction of `std::filesystem::path` from UTF-8 `std::string` is
+  unsafe on the supported Windows code page.
+- Errors are surfaced through logs and command exit codes; missing runtime
+  backends are not silently replaced.
+- IR is the exchange contract so expensive stages can be resumed and
+  rendered repeatedly.

@@ -1,0 +1,158 @@
+# TADC 单语行术语表（merge --single-line ...=glossary 使用）
+# 格式：<英文原文><TAB><中文>；匹配时忽略大小写与多余空白，按整行匹配。
+# 只收「中文轨没有译、但值得给出中文」的音效与短感叹词；长尾继续走 keep。
+# 统计来源：9 集英文 SDH 轨中 866 条无中文对应的行（623 音效 / 194 短句 / 其余）。
+#
+# 用法：
+#   iris convert 01.mkv --track lang=eng -o ep.en.iris.json
+#   iris convert 01.mkv --track lang=chi -o ep.zh.iris.json
+#   iris merge ep.en.iris.json ep.zh.iris.json --single-line sdh=glossary,interjection=glossary \
+#        --glossary docs/rules/tadc.sfx.tsv -o ep.bi.iris.json
+
+# ---- 人声（呼吸/情绪） ----
+[sighs]	（叹气）
+[panting]	（喘气）
+[groans]	（呻吟）
+[yelps]	（尖叫）
+[sniffles]	（抽鼻子）
+[gasps]	（倒吸气）
+[inhales deeply]	（深吸一口气）
+[grunts]	（闷哼）
+[stammers]	（结巴）
+[shrieks]	（尖声惊叫）
+[shrieking]	（尖声惊叫）
+[groaning]	（呻吟）
+[sobs]	（抽泣）
+[sobbing]	（抽泣）
+[gasping]	（喘息）
+[growls]	（低吼）
+[growling]	（低吼）
+[scoffs]	（嗤笑）
+[laughs weakly]	（虚弱地笑）
+[laughs nervously]	（紧张地笑）
+[laughing manically]	（疯狂地笑）
+[laughing hysterically]	（歇斯底里地笑）
+[wailing]	（哀号）
+[screams]	（尖叫）
+[screaming]	（尖叫）
+[coughs]	（咳嗽）
+[both yelp]	（两人齐声尖叫）
+[gasps softly]	（轻轻倒吸气）
+[chuckles]	（轻笑）
+
+# ---- 音乐 ----
+[music]	（音乐）
+[upbeat techno music plays]	（欢快的电子乐）
+[whimsical music plays]	（奇幻的音乐）
+[upbeat jazzy music plays]	（欢快的爵士乐）
+[upbeat, jazzy music plays]	（欢快的爵士乐）
+[dramatic music plays]	（戏剧性的音乐）
+[melancholic music plays]	（忧郁的音乐）
+[melancholic music]	（忧郁的音乐）
+[tense music plays]	（紧张的音乐）
+[tense music]	（紧张的音乐）
+[sinister music plays]	（阴森的音乐）
+[pensive music plays]	（沉思的音乐）
+[hopeful music plays]	（充满希望的音乐）
+[sentimental music playing]	（感伤的音乐）
+[invigorating music playing]	（振奋的音乐）
+[energetic drumming music]	（激昂的鼓点）
+[ethereal music playing]	（空灵的音乐）
+[eerie music]	（诡异的音乐）
+[eerie music plays]	（诡异的音乐）
+[dark music plays]	（阴郁的音乐）
+[mellow music plays]	（柔和的音乐）
+[pleasant, peaceful music plays]	（宁静的音乐）
+[upbeat music]	（欢快的音乐）
+[curious music plays]	（好奇的音乐）
+[comical music]	（滑稽的音乐）
+[music concludes]	（音乐结束）
+[music fades]	（音乐渐弱）
+[music stops]	（音乐停止）
+[music intensifies]	（音乐渐强）
+[music crescendos]	（音乐推向高潮）
+[music brightens]	（音乐转明）
+[dramatic musical sting plays]	（戏剧性的重音）
+[invigorating sting]	（振奋的重音）
+[no audible dialogue]	（无对白）
+
+# ---- 环境与动作 ----
+[bell jingles]	（铃铛作响）
+[insects chirping]	（虫鸣）
+[clock ticking]	（时钟滴答）
+[door creaks]	（门吱呀作响）
+[lid creaks]	（盖子吱呀作响）
+[door latch clicks]	（门闩咔哒）
+[keys jingling]	（钥匙叮当）
+[footsteps approaching]	（脚步声靠近）
+[tape clicks]	（磁带咔哒）
+[camera shutter clicking]	（相机快门声）
+[buzzing]	（嗡嗡声）
+[buzzing, beeping]	（嗡嗡与哔哔声）
+[high-pitched ringing]	（高频耳鸣）
+[sizzling]	（滋滋声）
+[squelching]	（黏腻的声响）
+[ominous rumbling]	（不祥的轰鸣）
+[heartbeat thudding]	（心跳声）
+[crowd cheering]	（人群欢呼）
+[creaking]	（吱呀声）
+[eerie scuttling]	（诡异的爬行声）
+
+# ---- 拟声 ----
+[ding!]	（叮！）
+[boink!]	（嘣！）
+[boink]	（嘣）
+[SPLAT!]	（啪叽！）
+[shwing]	（唰）
+[pop!]	（啵！）
+[snap]	（啪）
+[blam!]	（砰！）
+[loud thud]	（沉闷的撞击）
+[chain rattles]	（锁链作响）
+[glitching]	（故障噪声）
+[zapping]	（电击声）
+[warbling]	（颤音）
+[whooshing]	（呼啸声）
+[soft whooshing]	（轻微的呼啸）
+[portal shimmering]	（传送门微光）
+[electronic blipping]	（电子提示音）
+[blipping]	（哔哔声）
+[beeping, buzzing]	（哔哔与嗡嗡声）
+[buzzing, warbling]	（嗡嗡与颤音）
+[pinging]	（叮咚声）
+[rapid soft electronic tones warbling]	（急促的电子颤音）
+[soft twinkling]	（轻柔的闪烁声）
+[water warbles]	（水波声）
+[inaudible]	（听不清）
+[eerie silence]	（诡异的寂静）
+
+# ---- 短感叹词 ----
+Huh?	嗯？
+Huh??	嗯？？
+Uh…	呃……
+Uhh…	呃……
+U-Uh…	呃、呃……
+Uh--	呃——
+Hah!	哈！
+Heh.	嘿。
+Hmm.	嗯。
+Hmm!	嗯！
+Oh!	哦！
+Oh.	哦。
+Ow!	哎哟！
+Owww…	哎哟……
+Guh!	呃！
+Gah!	嘎！
+Aagh!	啊！
+AGH!!	啊！！
+Ugh.	呃。
+Ugh!	呃！
+Um…	唔……
+Eugh.	呃。
+Oop!	哎呀！
+Ah!	啊！
+Blegh!	呸！
+Whoa!	哇！
+Hey!	嘿！
+Boo!	嘘！
+Haha--	哈哈——

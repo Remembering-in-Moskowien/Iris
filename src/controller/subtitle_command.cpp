@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,8 +14,11 @@
 #include "iris/model/ir_document.hpp"
 #include "iris/subtitle/ass_script.hpp"
 #include "iris/subtitle/combine.hpp"
+#include "iris/subtitle/container.hpp"
 #include "iris/subtitle/ir_bridge.hpp"
 #include "iris/subtitle/parser.hpp"
+#include "iris/text/cleanup.hpp"
+#include "iris/ui/console.hpp"
 
 namespace iris::controller {
 
@@ -90,6 +94,29 @@ std::vector<subtitle::Cue> cues_from_script(const subtitle::AssScript& script) {
         if (!cue.text.empty()) cues.push_back(std::move(cue));
     }
     return cues;
+}
+
+/// 媒体容器（内封字幕轨）的扩展名。
+bool is_media_container(const std::string& path) {
+    static const char* kExt[] = {".mkv", ".mp4", ".m4v", ".mov", ".ts",
+                                 ".m2ts", ".webm", ".avi", ".wmv", ".flv"};
+    std::string ext = infra::path_to_utf8(infra::utf8_path(path).extension());
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    for (const char* e : kExt) {
+        if (ext == e) return true;
+    }
+    return false;
+}
+
+/// 去掉句子里夹带的不可见控制字符（不动 raw）。
+void strip_sentence_controls(model::WorkflowState& state) {
+    for (auto& track : state.tracks) {
+        for (auto& s : track.sentences) {
+            const std::string cleaned = text::strip_control_chars(s.text);
+            if (cleaned != s.text) s.text = cleaned;
+        }
+    }
 }
 
 /// 按时间重叠把 second 的文本配给 primary 的句子（双语合并）。
@@ -187,7 +214,7 @@ bool load_translation_lines(const std::string& path, std::vector<TranslationLine
 } // namespace
 
 int run_convert(const std::vector<std::string>& inputs, const std::string& language,
-                const std::string& out_path) {
+                const std::string& out_path, const std::string& track_selector) {
     if (!check_inputs(inputs)) return 1;
     if (inputs.size() != 1) {
         std::cerr << _("convert: expects exactly one subtitle file (use `combine` for several)\n",
@@ -195,23 +222,59 @@ int run_convert(const std::vector<std::string>& inputs, const std::string& langu
         return 1;
     }
 
-    auto doc = make_doc("convert", inputs, language);
-    std::size_t cue_count = 0;
+    const std::string original_input = inputs.front();
+    std::string source = original_input;
+    std::string effective_language = language;
+    std::string temp_file;
 
-    if (is_ass_path(inputs.front())) {
-        subtitle::AssScript script;
+    // 容器入口：按 --track 抽一条内封字幕轨，再走原来的字幕导入。
+    if (is_media_container(original_input) || !track_selector.empty()) {
+        std::vector<subtitle::MediaTrack> tracks;
         std::string error;
-        if (!subtitle::load_ass_script(inputs.front(), script, error)) {
+        if (!subtitle::probe_tracks(original_input, tracks, error)) {
             std::cerr << "convert: " << error << '\n';
             return 1;
         }
-        doc.state.tracks.push_back(subtitle::track_from_script(script, language));
+        subtitle::MediaTrack track;
+        if (!subtitle::select_track(tracks, track_selector, track, error)) {
+            std::cerr << "convert: " << error << '\n';
+            return 1;
+        }
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        const auto base = std::filesystem::temp_directory_path() /
+                          ("iris-track-" + std::to_string(track.index) + "-" +
+                           std::to_string(stamp));
+        if (!subtitle::extract_track(original_input, track, infra::path_to_utf8(base), temp_file,
+                                     error)) {
+            std::cerr << "convert: " << error << '\n';
+            return 1;
+        }
+        source = temp_file;
+        if (!track.language.empty()) effective_language = subtitle::normalize_language(track.language);
+        ui::note(_("convert: track ", "convert: 轨道 ") + std::to_string(track.index) + " (" +
+                 track.language + (track.title.empty() ? "" : "/" + track.title) + ") → " +
+                 effective_language);
+    }
+
+    auto doc = make_doc("convert", inputs, effective_language);
+    doc.generator.input_file = original_input;
+    doc.config.input_file_path = original_input;
+    std::size_t cue_count = 0;
+
+    if (is_ass_path(source)) {
+        subtitle::AssScript script;
+        std::string error;
+        if (!subtitle::load_ass_script(source, script, error)) {
+            std::cerr << "convert: " << error << '\n';
+            return 1;
+        }
+        doc.state.tracks.push_back(subtitle::track_from_script(script, effective_language));
         subtitle::apply_presentation(script, doc.state);
         cue_count = script.events.size();
     } else {
         std::vector<subtitle::Cue> cues;
         std::string error;
-        if (!subtitle::parse_file(inputs.front(), cues, error)) {
+        if (!subtitle::parse_file(source, cues, error)) {
             std::cerr << "convert: " << error << '\n';
             return 1;
         }
@@ -221,13 +284,20 @@ int run_convert(const std::vector<std::string>& inputs, const std::string& langu
             return 1;
         }
         cue_count = cues.size();
-        doc.state.tracks.push_back(to_track(cues, language));
+        doc.state.tracks.push_back(to_track(cues, effective_language));
     }
 
-    doc.provenance.push_back({"convert", inputs.front(), std::nullopt, std::nullopt});
+    strip_sentence_controls(doc.state);
 
-    const std::string out = out_path.empty() ? default_out(inputs.front(), "iris") : out_path;
+    doc.provenance.push_back({"convert", original_input, std::nullopt, std::nullopt});
+
+    const std::string out = out_path.empty() ? default_out(original_input, "iris") : out_path;
     doc.save(out);
+
+    if (!temp_file.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(infra::utf8_path(temp_file), ec);
+    }
 
     std::cout << _("convert: cues ", "convert: 字幕条数 ") << cue_count
               << _(", styles ", "，样式 ") << doc.state.styles.size() << _(" → ", " → ") << out

@@ -1,4 +1,4 @@
-# Windows 一键构建脚本：iris (C++ migration of Centurion)
+# Windows 一键构建脚本：Iris
 # 用法：powershell -ExecutionPolicy Bypass -File scripts/bootstrap.ps1 [-ConfigureOnly] [-SkipTests]
 param(
     [switch]$ConfigureOnly,

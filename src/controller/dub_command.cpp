@@ -11,6 +11,7 @@
 #include "iris/core/pipeline.hpp"
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/paths.hpp"
 #include "iris/ui/console.hpp"
 #include <nlohmann/json.hpp>
 #include "iris/model/ir_document.hpp"
@@ -27,7 +28,7 @@ namespace {
 
 /// 输入是否为 IR（*.json）——是则跳过转写，直接对已有句子配音。
 bool is_ir_path(const std::string& path) {
-    return fs::path(path).extension() == ".json";
+    return infra::path_to_utf8(infra::utf8_path(path).extension()) == ".json";
 }
 
 /// 解析 "SPEAKER=value" 形式的重复选项（值里可以带 = 与空格）。
@@ -85,7 +86,7 @@ bool load_voices_json(const std::string& path, std::vector<ops::SpeakerVoice>& o
 } // namespace
 
 int run_dub(const DubOptions& opts) {
-    if (!fs::exists(opts.input)) {
+    if (!fs::exists(infra::utf8_path(opts.input))) {
         std::cerr << _("dub: input not found: ", "dub: 输入文件不存在：") << opts.input << '\n';
         return 1;
     }
@@ -133,7 +134,7 @@ int run_dub(const DubOptions& opts) {
                            "'（支持: whisper | qwen3-asr | whisper-ct2）\n");
             return 1;
         }
-        if (opts.asr_model.empty() || !fs::exists(opts.asr_model)) {
+        if (opts.asr_model.empty() || !fs::exists(infra::utf8_path(opts.asr_model))) {
             std::cerr << _("dub: --asr-model is required for media input (path: ",
                            "dub: 媒体输入需要 --asr-model 指定 ASR 模型（路径：")
                       << opts.asr_model << ")\n";

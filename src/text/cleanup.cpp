@@ -47,26 +47,71 @@ bool is_cjk_punct(const std::string& s) {
 
 } // namespace
 
+std::string strip_control_chars(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size();) {
+        const auto b = static_cast<unsigned char>(text[i]);
+        const std::size_t len = std::min<std::size_t>(utf8_len(b), text.size() - i);
+        unsigned cp = b;
+        if (len == 2 && i + 1 < text.size()) {
+            cp = ((b & 0x1F) << 6) | (static_cast<unsigned char>(text[i + 1]) & 0x3F);
+        } else if (len == 3 && i + 2 < text.size()) {
+            cp = ((b & 0x0F) << 12) | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6) |
+                 (static_cast<unsigned char>(text[i + 2]) & 0x3F);
+        } else if (len == 4 && i + 3 < text.size()) {
+            cp = ((b & 0x07) << 18) | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 12) |
+                 ((static_cast<unsigned char>(text[i + 2]) & 0x3F) << 6) |
+                 (static_cast<unsigned char>(text[i + 3]) & 0x3F);
+        }
+        const bool drop = (cp >= 0x200B && cp <= 0x200F) || (cp >= 0x202A && cp <= 0x202E) ||
+                          (cp >= 0x2060 && cp <= 0x2064) || cp == 0xFEFF;
+        if (!drop) out.append(text, i, len);
+        i += len;
+    }
+    return out;
+}
+
+int count_control_chars(const std::string& text) {
+    int n = 0;
+    for (std::size_t i = 0; i < text.size();) {
+        const auto b = static_cast<unsigned char>(text[i]);
+        const std::size_t len = std::min<std::size_t>(utf8_len(b), text.size() - i);
+        unsigned cp = b;
+        if (len == 3 && i + 2 < text.size()) {
+            cp = ((b & 0x0F) << 12) | ((static_cast<unsigned char>(text[i + 1]) & 0x3F) << 6) |
+                 (static_cast<unsigned char>(text[i + 2]) & 0x3F);
+        }
+        if ((cp >= 0x200B && cp <= 0x200F) || (cp >= 0x202A && cp <= 0x202E) ||
+            (cp >= 0x2060 && cp <= 0x2064) || cp == 0xFEFF) {
+            ++n;
+        }
+        i += len;
+    }
+    return n;
+}
+
 std::string clean_text(const std::string& text, CleanupReport* report) {
     CleanupReport local;
     CleanupReport& rep = report != nullptr ? *report : local;
 
     const std::string original = text;
+    const std::string src = strip_control_chars(text);
 
     // 1) 汉字旁的 ASCII 空格去掉；连续空白压成一个
     std::string no_space;
-    no_space.reserve(text.size());
+    no_space.reserve(src.size());
     bool prev_space = false;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
+    for (std::size_t i = 0; i < src.size(); ++i) {
+        const char c = src[i];
         if (!is_space(c)) {
             no_space.push_back(c);
             prev_space = false;
             continue;
         }
         // 只在「两侧都是中文」时删空格：数字/英文与中文之间的空格是有意义的
-        const bool left_cjk = i > 0 && is_utf8_byte(text[i - 1]);
-        const bool right_cjk = i + 1 < text.size() && is_utf8_byte(text[i + 1]);
+        const bool left_cjk = i > 0 && is_utf8_byte(src[i - 1]);
+        const bool right_cjk = i + 1 < src.size() && is_utf8_byte(src[i + 1]);
         if (left_cjk && right_cjk) continue;
         if (prev_space) continue;
         no_space.push_back(' ');

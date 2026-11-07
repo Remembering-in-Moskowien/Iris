@@ -381,4 +381,75 @@ KaraokeResult distribute_even(const std::string& text, int total_cs) {
     return out;
 }
 
+KaraokeResult distribute_even_weighted(const std::string& text, int total_cs) {
+    KaraokeResult out;
+    const auto tokens = lyric_tokens(text);
+    if (tokens.empty() || total_cs <= 0) return out;
+    const int n = static_cast<int>(tokens.size());
+
+    // 英文按音节、中文按字；词内再按权重分时长，避免 "a" 和 "beautiful" 一样长。
+    std::vector<double> weights(static_cast<std::size_t>(n), 1.0);
+    double weight_sum = 0.0;
+    for (int i = 0; i < n; ++i) {
+        weights[static_cast<std::size_t>(i)] =
+            static_cast<double>(std::max(1, source_weight(tokens[static_cast<std::size_t>(i)])));
+        weight_sum += weights[static_cast<std::size_t>(i)];
+    }
+
+    std::vector<int> durs(static_cast<std::size_t>(n), 1);
+    int assigned = n;
+    if (n > total_cs) {
+        // 极短行：只能按顺序给前 total_cs 个 token 各 1cs
+        durs.assign(static_cast<std::size_t>(n), 0);
+        for (int i = 0; i < total_cs; ++i) durs[static_cast<std::size_t>(i)] = 1;
+        assigned = total_cs;
+    } else {
+        for (int i = 0; i < n; ++i) {
+            const double quota = static_cast<double>(total_cs) *
+                                 weights[static_cast<std::size_t>(i)] / weight_sum;
+            durs[static_cast<std::size_t>(i)] = std::max(1, static_cast<int>(std::floor(quota)));
+            assigned += durs[static_cast<std::size_t>(i)] - 1;
+        }
+    }
+    while (assigned < total_cs) {
+        int best = 0;
+        double best_gap = -1.0;
+        for (int i = 0; i < n; ++i) {
+            const double quota = static_cast<double>(total_cs) *
+                                 weights[static_cast<std::size_t>(i)] / weight_sum;
+            const double gap = quota - static_cast<double>(durs[static_cast<std::size_t>(i)]);
+            if (gap > best_gap) {
+                best_gap = gap;
+                best = i;
+            }
+        }
+        ++durs[static_cast<std::size_t>(best)];
+        ++assigned;
+    }
+    while (assigned > total_cs) {
+        int best = -1;
+        int best_dur = 0;
+        for (int i = 0; i < n; ++i) {
+            if (durs[static_cast<std::size_t>(i)] > best_dur) {
+                best_dur = durs[static_cast<std::size_t>(i)];
+                best = i;
+            }
+        }
+        if (best < 0 || best_dur <= 1) break;
+        --durs[static_cast<std::size_t>(best)];
+        --assigned;
+    }
+
+    std::string raw;
+    raw.reserve(text.size() + static_cast<std::size_t>(n) * 8);
+    for (int i = 0; i < n; ++i) {
+        raw += "{\\K" + std::to_string(durs[static_cast<std::size_t>(i)]) + "}";
+        raw += tokens[static_cast<std::size_t>(i)];
+    }
+    out.raw = std::move(raw);
+    out.tokens = n;
+    out.total_cs = total_cs;
+    return out;
+}
+
 } // namespace iris::text

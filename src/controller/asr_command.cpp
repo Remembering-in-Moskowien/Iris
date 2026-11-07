@@ -8,6 +8,7 @@
 #include "iris/asr/asr.hpp"
 #include "iris/core/pipeline.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/paths.hpp"
 #include "iris/ui/console.hpp"
 #include <nlohmann/json.hpp>
 #include "iris/model/config.hpp"
@@ -30,7 +31,7 @@ int run_asr(const std::string& input, const std::string& language, const std::st
             const asr::DiarizeOptions* diarize, int n_threads,
             const asr::SeparateOptions* separate, const std::string& punc_model,
             const std::string& split_strategy, const std::string& split_model) {
-    if (!fs::exists(input)) {
+    if (!fs::exists(infra::utf8_path(input))) {
         spdlog::error("asr: 输入文件不存在: {}", input);
         return 1;
     }
@@ -49,7 +50,7 @@ int run_asr(const std::string& input, const std::string& language, const std::st
                       "crispasr 或 ct2 包，用 `iris doctor` 查看）", engine);
         return 1;
     }
-    if (!fs::exists(model)) {
+    if (!fs::exists(infra::utf8_path(model))) {
         spdlog::error("asr: 模型路径不存在: {}", model);
         return 1;
     }
@@ -121,10 +122,11 @@ int run_asr(const std::string& input, const std::string& language, const std::st
         return 1;
     }
 
-    const fs::path out_path =
-        output.empty() ? fs::path(input + ".iris.json") : fs::path(output);
-    doc.save(out_path.string());
-    spdlog::info("asr: 已保存 IR -> {}", out_path.string());
+    const fs::path out_path = output.empty() ? infra::utf8_path(input + ".iris.json")
+                                              : infra::utf8_path(output);
+    const std::string out_path_utf8 = infra::path_to_utf8(out_path);
+    doc.save(out_path_utf8);
+    spdlog::info("asr: 已保存 IR -> {}", out_path_utf8);
 
     // JSON 模式：给调用方一个结构化结果
     int sentences = 0;
@@ -142,7 +144,7 @@ int run_asr(const std::string& input, const std::string& language, const std::st
     ui::json_out(nlohmann::json({{"ok", true},
                                  {"command", "asr"},
                                  {"input", input},
-                                 {"ir", out_path.string()},
+                                 {"ir", out_path_utf8},
                                  {"engine", engine},
                                  {"language", language},
                                  {"sentences", sentences},

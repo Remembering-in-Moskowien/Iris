@@ -29,6 +29,7 @@ bool Translate::execute(core::PipelineContext& ctx) {
     }
 
     mt::Translator translator;
+    llm::Scheduler scheduler(opts_.llm);
     std::string error;
     if (!translator.open(opts_.mt, error)) {
         spdlog::error("{}", error);
@@ -51,6 +52,15 @@ bool Translate::execute(core::PipelineContext& ctx) {
             return false;
         }
         translated = mt::normalize_output(translated, opts_.mt.target);
+        if (scheduler.enabled()) {
+            std::string refined;
+            if (!scheduler.refine_translation(s.text, translated, opts_.mt.target, refined, error)) {
+                spdlog::warn("translate: LLM 校对第 {}/{} 句失败，保留机器译文：{}",
+                             done + 1, total, error);
+            } else {
+                translated = mt::normalize_output(refined, opts_.mt.target);
+            }
+        }
         model::Sentence t = s; // 保留时间码/说话人/词级信息
         t.translated_text = translated;
         out.sentences.push_back(std::move(t));

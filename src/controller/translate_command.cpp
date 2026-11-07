@@ -44,6 +44,11 @@ int run_translate(const TranslateCommandOptions& opts) {
                   << '\n';
         return 1;
     }
+    if (!opts.llm.endpoint.empty() && opts.llm.model.empty()) {
+        std::cerr << _("translate: --llm-model is required with --llm-endpoint\n",
+                       "translate: 使用 --llm-endpoint 时必须提供 --llm-model\n");
+        return 1;
+    }
 
     const bool from_ir = is_ir_path(opts.input);
     const fs::path work = fs::temp_directory_path() / "iris-translate";
@@ -92,6 +97,7 @@ int run_translate(const TranslateCommandOptions& opts) {
     tr.mt.target = opts.to;
     tr.mt.beam_size = opts.beam_size;
     tr.mt.max_tokens = opts.max_tokens;
+    tr.llm = opts.llm;
     tr.after_asr = !from_ir;
     pipeline.add(std::make_shared<ops::Translate>(std::move(tr)));
 

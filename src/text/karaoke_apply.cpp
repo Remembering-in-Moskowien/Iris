@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 #include "iris/text/karaoke.hpp"
@@ -32,6 +33,18 @@ bool karaoke_from_words(const model::Sentence& s, std::string& out, int target_c
     return true;
 }
 
+bool role_matches(const model::Sentence& s, const std::string& only_role) {
+    if (only_role.empty()) return true;
+    return s.role.has_value() && *s.role == only_role;
+}
+
+bool needs_translation(const model::Sentence& s, bool overwrite) {
+    if (s.comment || !s.raw || !has_karaoke(*s.raw)) return false;
+    if (!s.translated_text || s.translated_text->empty()) return false;
+    if (s.translated_raw && !s.translated_raw->empty() && !overwrite) return false;
+    return true;
+}
+
 } // namespace
 
 void apply_karaoke(model::IrDocument& doc, const KaraokeApplyOptions& options,
@@ -39,7 +52,7 @@ void apply_karaoke(model::IrDocument& doc, const KaraokeApplyOptions& options,
     for (auto& track : doc.state.tracks) {
         // 0) 已有词级时间（align 产物）→ 直接生成 \K。
         for (auto& s : track.sentences) {
-            if (s.comment || s.words.empty()) continue;
+            if (s.comment || s.words.empty() || !role_matches(s, options.only_role)) continue;
             if (s.raw && has_karaoke(*s.raw)) continue;
             std::string raw;
             if (karaoke_from_words(s, raw, static_cast<int>(line_cs(s)))) {
@@ -50,9 +63,8 @@ void apply_karaoke(model::IrDocument& doc, const KaraokeApplyOptions& options,
 
         // 1) 同一句自带源节奏（英文原文 \K）+ 译文 → 投影出译文的 \K。
         for (auto& s : track.sentences) {
-            if (s.comment || !s.raw || !s.translated_text || s.translated_text->empty()) continue;
-            if (!has_karaoke(*s.raw)) continue;
-            if (s.translated_raw && !s.translated_raw->empty() && !options.overwrite) continue;
+            if (!role_matches(s, options.only_role)) continue;
+            if (!needs_translation(s, options.overwrite)) continue;
             KaraokeResult result;
             std::string error;
             if (project_translation(*s.raw, *s.translated_text, static_cast<int>(line_cs(s)),
@@ -72,6 +84,7 @@ void apply_karaoke(model::IrDocument& doc, const KaraokeApplyOptions& options,
         }
         for (auto& s : track.sentences) {
             if (s.comment || s.text.empty()) continue;
+            if (!role_matches(s, options.only_role)) continue;
             if (s.raw && has_karaoke(*s.raw)) continue;
             const model::Sentence* source = nullptr;
             for (const auto* other : sources) {
@@ -88,13 +101,31 @@ void apply_karaoke(model::IrDocument& doc, const KaraokeApplyOptions& options,
                 s.raw = std::move(result.raw);
                 ++stats.projected;
             } else if (options.fill_even && line_cs(s) > 0) {
-                result = distribute_even(s.text, static_cast<int>(line_cs(s)));
+                result = options.even_syllables
+                             ? distribute_even_weighted(s.text, static_cast<int>(line_cs(s)))
+                             : distribute_even(s.text, static_cast<int>(line_cs(s)));
                 if (!result.raw.empty()) {
                     s.raw = std::move(result.raw);
                     ++stats.even;
                 } else {
                     ++stats.skipped;
                 }
+            } else {
+                ++stats.skipped;
+            }
+        }
+
+        // 3) 兜底生成 \K 之后再投影一次译文：上一步刚给英文歌词打完轴，
+        //    译文行在第一轮里还没有源节奏可投影。
+        for (auto& s : track.sentences) {
+            if (!role_matches(s, options.only_role)) continue;
+            if (!needs_translation(s, options.overwrite)) continue;
+            KaraokeResult result;
+            std::string error;
+            if (project_translation(*s.raw, *s.translated_text, static_cast<int>(line_cs(s)),
+                                    result, &error)) {
+                s.translated_raw = std::move(result.raw);
+                ++stats.translated;
             } else {
                 ++stats.skipped;
             }

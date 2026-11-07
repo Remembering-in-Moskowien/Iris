@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <system_error>
 #include <vector>
 
@@ -40,6 +42,62 @@ AudioRange sentence_range(std::int64_t start_ms, std::int64_t end_ms, std::int64
                          static_cast<double>(end_ms) / 1000.0 + pad);
     if (range.end < range.start) range.end = range.start;
     return range;
+}
+
+void repair_collapsed_words(std::vector<model::Word>& words, double range_start,
+                            double range_end) {
+    std::size_t i = 0;
+    while (i < words.size()) {
+        if (std::isfinite(words[i].start) && std::isfinite(words[i].end) &&
+            words[i].end > words[i].start) {
+            ++i;
+            continue;
+        }
+        const std::size_t begin = i;
+        while (i < words.size() &&
+               (!std::isfinite(words[i].start) || !std::isfinite(words[i].end) ||
+                words[i].end <= words[i].start))
+            ++i;
+        const double left = begin == 0 ? range_start : words[begin - 1].end;
+        const double next = i == words.size() ? range_end : words[i].start;
+        const double right = std::max(next, left + 0.08 * static_cast<double>(i - begin));
+        const double step = (right - left) / static_cast<double>(i - begin);
+        for (std::size_t k = begin; k < i; ++k) {
+            words[k].start = left + step * static_cast<double>(k - begin);
+            words[k].end = left + step * static_cast<double>(k - begin + 1);
+        }
+    }
+}
+
+bool apply_word_timings_to_sentence(model::Sentence& sentence, std::int64_t total_ms) {
+    double start = std::numeric_limits<double>::infinity();
+    double end = 0.0;
+    std::size_t valid_words = 0;
+    for (const auto& word : sentence.words) {
+        if (!std::isfinite(word.start) || !std::isfinite(word.end) || word.start < 0.0 ||
+            word.end <= word.start) {
+            continue;
+        }
+        ++valid_words;
+        start = std::min(start, word.start);
+        end = std::max(end, word.end);
+    }
+    if (!std::isfinite(start) || end <= start ||
+        valid_words * 5 < sentence.words.size() * 3) {
+        return false;
+    }
+
+    std::size_t text_characters = 0;
+    for (const unsigned char ch : sentence.text) {
+        if ((ch & 0xC0) != 0x80) ++text_characters;
+    }
+    if (end - start < std::max(0.1, static_cast<double>(text_characters) / 50.0)) return false;
+
+    const auto start_ms = static_cast<std::int64_t>(std::llround(start * 1000.0));
+    const auto end_ms = static_cast<std::int64_t>(std::llround(end * 1000.0));
+    sentence.start_ms = std::clamp<std::int64_t>(start_ms, 0, total_ms);
+    sentence.end_ms = std::clamp<std::int64_t>(end_ms, sentence.start_ms, total_ms);
+    return sentence.end_ms > sentence.start_ms;
 }
 
 bool decode_media_16k(const std::string& media, std::vector<float>& pcm, std::string& error) {
@@ -153,8 +211,14 @@ bool align_track(model::Track& track, const std::vector<float>& pcm, int sample_
         if (words.empty()) {
             ++stats.failed;
         } else {
+            repair_collapsed_words(words, range.start, range.end);
             stats.tokens += static_cast<int>(words.size());
             s.words = std::move(words);
+            if (options.apply_sentence_timings && !apply_word_timings_to_sentence(s, total_ms)) {
+                ++stats.failed;
+                ++done;
+                continue;
+            }
             ++stats.aligned;
         }
 

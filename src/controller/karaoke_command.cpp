@@ -11,7 +11,8 @@
 namespace iris::controller {
 
 int run_karaoke(const std::string& ir_path, const std::string& out_path, bool fill_even,
-                bool overwrite, int tolerance_ms) {
+                bool overwrite, int tolerance_ms, bool even_syllables,
+                const std::string& only_role) {
     model::IrDocument doc;
     try {
         doc = model::IrDocument::load(ir_path);
@@ -22,8 +23,10 @@ int run_karaoke(const std::string& ir_path, const std::string& out_path, bool fi
 
     text::KaraokeApplyOptions options;
     options.fill_even = fill_even;
+    options.even_syllables = even_syllables;
     options.overwrite = overwrite;
     options.tolerance_ms = tolerance_ms;
+    options.only_role = only_role;
     text::KaraokeApplyStats stats;
     text::apply_karaoke(doc, options, stats);
 

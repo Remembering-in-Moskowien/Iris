@@ -15,9 +15,14 @@ param(
     [string]$Media    = "models/jfk.wav",
     [string]$Ref      = "models/jfk.wav",
     [string]$RefText  = "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+    [int]$SampleStartSeconds = 0,
+    [int]$SampleDurationSeconds = 0,
+    [int]$ReferenceStartSeconds = -1,
+    [int]$ReferenceDurationSeconds = 0,
     [string]$Language = "en",
     [string]$AsrEngine = "whisper",
     [string]$AsrModel  = "models/ggml/ggml-base.bin",
+    [string]$BackAsrModel = "models/ggml/ggml-base.bin",
     [string]$EmotionModel = "models/emotion/wav2vec2-emotion-fp32.onnx",
     [string]$TtsModel = "models/qwen3-tts/qwen3-tts-12hz-0.6b-base-q8_0.gguf",
     [string]$TtsCodec = "models/qwen3-tts/qwen3-tts-tokenizer-12hz.gguf",
@@ -36,18 +41,51 @@ Need $Exe
 Need $Media
 Need $TtsModel
 Need $TtsCodec
-Need $Ref
+Need $BackAsrModel
 if ($AsrEngine -ne "none") { Need $AsrModel }
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Out) | Out-Null
 
+$effectiveMedia = $Media
+$mediaStem = [IO.Path]::GetFileNameWithoutExtension((Resolve-Path -LiteralPath $Media).Path)
+if ($SampleStartSeconds -lt 0 -or $SampleDurationSeconds -lt 0) {
+    Fail "样本起点和时长不能为负数"
+}
+if ($SampleDurationSeconds -eq 0 -and $SampleStartSeconds -gt 0) {
+    Fail "指定 SampleStartSeconds 时必须同时指定正的 SampleDurationSeconds"
+}
+if ($ReferenceDurationSeconds -lt 0) {
+    Fail "参考音频时长不能为负数"
+}
+if ($SampleDurationSeconds -gt 0) {
+    if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { Fail "缺少 ffmpeg" }
+    $effectiveMedia = Join-Path (Split-Path -Parent $Out) "$mediaStem.dub-sample.wav"
+    & ffmpeg -y -ss $SampleStartSeconds -i $Media -t $SampleDurationSeconds `
+        -vn -ac 1 -ar 16000 -c:a pcm_s16le $effectiveMedia
+    if ($LASTEXITCODE -ne 0) { Fail "提取 dub 样本失败：ffmpeg 退出码 $LASTEXITCODE" }
+}
+
+$effectiveRef = $Ref
+if ($ReferenceDurationSeconds -gt 0 -or $ReferenceStartSeconds -ge 0) {
+    if ($ReferenceStartSeconds -lt 0 -or $ReferenceDurationSeconds -le 0) {
+        Fail "参考音频裁剪需要同时指定非负 ReferenceStartSeconds 和正 ReferenceDurationSeconds"
+    }
+    if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { Fail "缺少 ffmpeg" }
+    $effectiveRef = Join-Path (Split-Path -Parent $Out) "dub-reference.wav"
+    & ffmpeg -y -ss $ReferenceStartSeconds -i $Media -t $ReferenceDurationSeconds `
+        -vn -ac 1 -ar 24000 -c:a pcm_s16le $effectiveRef
+    if ($LASTEXITCODE -ne 0) { Fail "提取参考音频失败：ffmpeg 退出码 $LASTEXITCODE" }
+} else {
+    Need $effectiveRef
+}
+
 $irisArgs = @(
-    "dub", $Media,
+    "dub", $effectiveMedia,
     "--engine", "qwen3-tts",
     "--model", $TtsModel,
     "--codec", $TtsCodec,
     "--language", $Language,
-    "--ref", $Ref,
+    "--ref", $effectiveRef,
     "--ref-text", $RefText,
     "--out", $Out,
     "--ir-out", $IrOut
@@ -94,7 +132,7 @@ if ($LASTEXITCODE -ne 0) { Fail "IR 校验失败" }
 if ($AsrEngine -ne "none") {
     Write-Host "==> 回听：whisper 转写配音结果" -ForegroundColor Cyan
     $backIr = [IO.Path]::ChangeExtension($Out, ".asr.json")
-    & $Exe asr $Out --engine whisper --model $AsrModel --language $Language --output $backIr | Out-Null
+    & $Exe asr $Out --engine whisper --model $BackAsrModel --language $Language --output $backIr | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "回听转写失败" }
     (Get-Content $backIr -Raw | ConvertFrom-Json).state.tracks |
         ForEach-Object { $_.sentences } |

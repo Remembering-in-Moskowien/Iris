@@ -63,14 +63,62 @@ bool parse_shift_ms(const std::string& text, std::int64_t& out) {
     return true;
 }
 
+/// 解析 --single-line：`sdh=glossary,interjection=drop`（键名也接受 sfx / annot）。
+bool parse_single_line_policy(const std::string& spec, controller::MergeOptions& opts,
+                              std::string& error) {
+    if (spec.empty()) return true;
+    std::size_t begin = 0;
+    while (begin <= spec.size()) {
+        const std::size_t end = spec.find(',', begin);
+        std::string item =
+            spec.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        while (!item.empty() && std::isspace(static_cast<unsigned char>(item.front())))
+            item.erase(item.begin());
+        while (!item.empty() && std::isspace(static_cast<unsigned char>(item.back()))) item.pop_back();
+        if (!item.empty()) {
+            const auto eq = item.find('=');
+            if (eq == std::string::npos) {
+                error = "--single-line 需要 key=value：" + item;
+                return false;
+            }
+            std::string key = item.substr(0, eq);
+            std::string value = item.substr(eq + 1);
+            for (char& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (char& c : value) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (value != "keep" && value != "drop" && value != "glossary") {
+                error = "--single-line 的取值只能是 keep / drop / glossary：" + item;
+                return false;
+            }
+            if (key == "sdh" || key == "sfx" || key == "annot") {
+                opts.policy_sdh = value;
+            } else if (key == "interjection") {
+                opts.policy_interjection = value;
+            } else if (key == "dialogue") {
+                opts.policy_dialogue = value;
+            } else if (key == "lyric") {
+                opts.policy_lyric = value;
+            } else {
+                error = "未知的类别：" + key + "（sdh / interjection / dialogue / lyric）";
+                return false;
+            }
+        }
+        if (end == std::string::npos) break;
+        begin = end + 1;
+    }
+    return true;
+}
+
 } // namespace
 
 int run(int argc, char** argv) {
-    CLI::App app{"iris — speech in, subtitles out (C++ migration of Centurion)"};
+    CLI::App app{"iris — speech in, subtitles out"};
     app.set_version_flag("--version", std::string("iris ") + controller::kVersion);
 
     bool verbose = false;
     app.add_flag("-v,--verbose", verbose, "Verbose logging");
+    std::string log_file;
+    app.add_option("--log-file", log_file, "Log file path (default: .cache/iris/iris.log)")
+        ->envname("IRIS_LOG_FILE");
     bool agent = false;
     bool json_output = false;
     app.add_flag("--json", json_output, "JSON mode: stdout carries only a JSON result document");
@@ -139,6 +187,8 @@ int run(int argc, char** argv) {
     build->add_option("--output,-o", build_out, "Output path");
     build->add_option("--template,-t", build_opts.template_path,
                       "Style template (.json, or an .ass/.ssa to extract from)");
+    build->add_option("--style-sheet", build_opts.style_sheet_path,
+                      "Style sheet JSON path (overrides --template styles)");
     build->add_flag("--bilingual", build_opts.bilingual,
                     "Emit translated + original lines with the same timecode");
     build->add_option("--shift", build_shift, "Global shift: +1:10:27.30 or +4227.3 (seconds)");
@@ -151,6 +201,11 @@ int run(int argc, char** argv) {
     auto* validate = app.add_subcommand("validate", "Validate an IR file");
     std::string v_ir;
     validate->add_option("ir", v_ir, "IR file")->required();
+
+    auto* compact = app.add_subcommand("compact", "Write an IR file without formatting whitespace");
+    std::string compact_ir, compact_out;
+    compact->add_option("ir", compact_ir, "IR file (*.iris.json)")->required();
+    compact->add_option("--output,-o", compact_out, "Output path");
 
     // ---- doctor ----
     app.add_subcommand("doctor", "Environment diagnostics");
@@ -242,7 +297,7 @@ int run(int argc, char** argv) {
 
     // ---- translate ----
     auto* translate = app.add_subcommand(
-        "translate", "Machine translation (non-LLM: OPUS-MT/Marian, M2M100)");
+        "translate", "Machine translation with optional LLM post-editing");
     controller::TranslateCommandOptions translate_opts;
     translate->add_option("input", translate_opts.input, "IR file (*.json) or media file")
         ->required();
@@ -265,6 +320,16 @@ int run(int argc, char** argv) {
     translate->add_option("--max-tokens", translate_opts.max_tokens,
                           "Max generated tokens per sentence")
         ->capture_default_str();
+    translate->add_option("--llm-endpoint", translate_opts.llm.endpoint,
+                          "Optional OpenAI-compatible /chat/completions endpoint");
+    translate->add_option("--llm-model", translate_opts.llm.model,
+                          "LLM model name used for translation post-editing");
+    translate->add_option("--llm-api-key", translate_opts.llm.api_key,
+                          "LLM API key (or IRIS_LLM_API_KEY)");
+    translate->add_option("--llm-timeout", translate_opts.llm.timeout_seconds,
+                          "LLM request timeout in seconds")->capture_default_str();
+    translate->add_option("--llm-retries", translate_opts.llm.retries,
+                          "LLM request retries")->capture_default_str();
 
     // ---- config ----
     auto* config = app.add_subcommand("config", "Show or create the user configuration");
@@ -360,13 +425,21 @@ int run(int argc, char** argv) {
     ocr->add_option("--fps", ocr_opts.sample_fps, "Frame sampling rate for detection")
         ->capture_default_str();
 
-    // ---- convert / combine ----
-    auto* convert = app.add_subcommand("convert", "Import one subtitle file (SRT/ASS/VTT) into an IR");
-    std::vector<std::string> convert_inputs, combine_inputs;
-    std::string convert_out, combine_out, convert_lang = "en", combine_lang = "en";
-    convert->add_option("subtitle", convert_inputs, "Subtitle file (.srt/.ass/.ssa/.vtt)")->required();
+    // ---- convert / combine / merge / tracks ----
+    auto* convert = app.add_subcommand(
+        "convert", "Import one subtitle file (SRT/ASS/VTT) or one embedded track of a media file");
+    std::vector<std::string> convert_inputs, combine_inputs, merge_inputs;
+    std::string convert_out, combine_out, convert_lang = "en", combine_lang = "en", merge_out;
+    std::string convert_track;
+    convert->add_option("subtitle", convert_inputs,
+                        "Subtitle file (.srt/.ass/.ssa/.vtt) or media file (.mkv/.mp4 ...)")
+        ->required();
     convert->add_option("--out,-o", convert_out, "Output IR path");
-    convert->add_option("--language,-l", convert_lang, "Language code")->capture_default_str();
+    convert->add_option("--language,-l", convert_lang,
+                        "Language code (default: taken from the track metadata when present)")
+        ->capture_default_str();
+    convert->add_option("--track,-t", convert_track,
+                        "Embedded subtitle track: index (3) | lang=chi | title=SDH");
 
     auto* combine = app.add_subcommand("combine", "Merge several subtitle files into one IR");
     combine->add_option("subtitles", combine_inputs, "Subtitle files (first = primary)")
@@ -379,6 +452,44 @@ int run(int argc, char** argv) {
                       "Treat the second file as the translation of the first");
     combine->add_flag("--text", combine_text,
                       "Second input is a plain-text translation (one line per cue, paired by order)");
+
+    auto* tracks_cmd = app.add_subcommand("tracks", "List streams/tracks inside a media container");
+    std::string tracks_media;
+    tracks_cmd->add_option("media", tracks_media, "Media file (.mkv/.mp4 ...)")->required();
+
+    auto* merge = app.add_subcommand(
+        "merge", "Re-segment two subtitle tracks into one bilingual IR (primary = first file)");
+    controller::MergeOptions merge_opts;
+    std::string merge_policy;
+    merge->add_option("primary", merge_inputs, "Primary subtitle/IR (e.g. the English SDH track)")
+        ->required();
+    merge->add_option("--out,-o", merge_out, "Output IR (default: <primary>.bi.iris.json)");
+    merge->add_option("--primary-lang", merge_opts.primary_language,
+                      "Language of the event skeleton (default: en)")
+        ->capture_default_str();
+    merge->add_option("--secondary-lang", merge_opts.secondary_language,
+                      "Language of the translation track (default: zh)")
+        ->capture_default_str();
+    merge->add_option("--single-line", merge_policy,
+                      "Single-language policy per category: sdh=keep|drop|glossary,"
+                      " interjection=..., dialogue=..., lyric=...");
+    merge->add_option("--glossary", merge_opts.glossary_path,
+                      "Glossary for the glossary policy: `<from><TAB><to>` per line");
+    merge->add_option("--report", merge_opts.report_path, "HTML review report");
+    merge->add_option("--split", merge_opts.split_strategy,
+                      "Pre-split cues with rule or optional SaT semantic segmentation")
+        ->capture_default_str();
+    merge->add_option("--split-model", merge_opts.split_model,
+                      "SaT model directory (used with --split sat)");
+    bool merge_no_english_merge = false;
+    merge->add_flag("--no-english-merge", merge_no_english_merge,
+                    "Never merge primary cues when the translation cannot be split");
+    merge->add_option("--max-chars-en", merge_opts.max_chars_en,
+                      "English line budget used by the merge fallback (default: 42)")
+        ->capture_default_str();
+    merge->add_option("--max-cps-zh", merge_opts.max_cps_zh,
+                      "Chinese CPS threshold for the report (default: 8)")
+        ->capture_default_str();
 
     // ---- correct ----
     auto* correct = app.add_subcommand(
@@ -401,6 +512,7 @@ int run(int argc, char** argv) {
     std::string align_media, align_ir, align_out;
     asr::AlignOptions align_opts;
     bool align_dry = false;
+    bool align_sentence_times = false;
     align->add_option("media", align_media, "Media file (audio/video)")->required();
     align->add_option("--ir", align_ir, "IR file with the transcript")->required();
     align->add_option("--model", align_opts.model,
@@ -413,6 +525,8 @@ int run(int argc, char** argv) {
     align->add_option("--pad", align_opts.pad_seconds, "Audio padding per sentence (default 0.2s)")
         ->capture_default_str();
     align->add_flag("--dry-run", align_dry, "Decode audio and report ranges only");
+    align->add_flag("--apply-sentence-timings", align_sentence_times,
+                    "Replace sentence bounds with the aligned word span");
 
     // ---- diff ----
     auto* diff = app.add_subcommand("diff", "Compare an IR against a reference subtitle");
@@ -432,11 +546,17 @@ int run(int argc, char** argv) {
         "karaoke", "Generate \\K timing: project a translation onto the source line's rhythm");
     std::string karaoke_ir, karaoke_out;
     bool karaoke_even = false;
+    bool karaoke_even_syllables = false;
     bool karaoke_overwrite = false;
+    std::string karaoke_role;
     int karaoke_tol = 30;
     karaoke->add_option("ir", karaoke_ir, "IR file (*.iris.json)")->required();
     karaoke->add_option("--out,-o", karaoke_out, "Output IR (default: <ir>.karaoke.iris.json)");
     karaoke->add_flag("--even", karaoke_even, "Even-split lines that have no timed source line");
+    karaoke->add_flag("--even-syllables", karaoke_even_syllables,
+                      "Weight the even split by syllable count (English lyrics without word timings)");
+    karaoke->add_option("--role", karaoke_role,
+                        "Only process sentences with this role (e.g. lyric)");
     karaoke->add_flag("--overwrite", karaoke_overwrite, "Recompute existing translatedRaw");
     karaoke->add_option("--tolerance-ms", karaoke_tol,
                         "Time tolerance for matching the timed line (default 30)")
@@ -556,7 +676,7 @@ int run(int argc, char** argv) {
     }
     if (json_output) iris::ui::set_json_mode(true);
     if (agent) iris::ui::set_agent_mode(true);
-    infra::init_logger(verbose);
+    infra::init_logger(verbose, log_file);
 
     // 配置：--config / IRIS_CONFIG / 用户目录（首次运行会生成）
     auto cfg = model::load_active_config(config_path);
@@ -635,6 +755,7 @@ int run(int argc, char** argv) {
         return controller::run_build(build_ir, build_fmt, build_out, build_opts);
     }
     if (validate->parsed()) return controller::run_validate(v_ir);
+    if (compact->parsed()) return controller::run_compact(compact_ir, compact_out);
     if (vsf->parsed()) {
         int rx=0, ry=0, rw=0, rh=0;
         if (std::sscanf(vsf_roi_str.c_str(), "%d,%d,%d,%d", &rx, &ry, &rw, &rh) != 4) {
@@ -668,6 +789,7 @@ int run(int argc, char** argv) {
         return controller::run_diff(diff_ir, diff_ref, diff_html, diff_min, diff_cjk);
     if (align->parsed()) {
         align_opts.dry_run = align_dry;
+        align_opts.apply_sentence_timings = align_sentence_times;
         if (!align_dry && align_opts.model.empty()) {
             std::cerr << _("align: --model is required (qwen3-forced-aligner-0.6b-q4_k.gguf)\n",
                            "align: 需要 --model（qwen3-forced-aligner-0.6b-q4_k.gguf）\n");
@@ -704,7 +826,7 @@ int run(int argc, char** argv) {
     }
     if (karaoke->parsed())
         return controller::run_karaoke(karaoke_ir, karaoke_out, karaoke_even, karaoke_overwrite,
-                                       karaoke_tol);
+                                       karaoke_tol, karaoke_even_syllables, karaoke_role);
     if (config_path_cmd->parsed()) {
         std::cout << model::active_config_path() << '\n';
         return 0;
@@ -738,7 +860,23 @@ int run(int argc, char** argv) {
         if (ocr_opts.model_dir == "models/ocr") ocr_opts.model_dir = cfg.resolve(cfg.ocr_model_dir);
         return controller::run_ocr(ocr_opts);
     }
-    if (convert->parsed()) return controller::run_convert(convert_inputs, convert_lang, convert_out);
+    if (tracks_cmd->parsed()) return controller::run_tracks(tracks_media);
+    if (merge->parsed()) {
+        if (merge_inputs.size() != 2) {
+            std::cerr << _("merge: needs exactly two inputs (primary, translation)\n",
+                           "merge: 需要正好两个输入（主轨、译文轨）\n");
+            return 1;
+        }
+        std::string policy_error;
+        if (!parse_single_line_policy(merge_policy, merge_opts, policy_error)) {
+            std::cerr << "merge: " << policy_error << '\n';
+            return 1;
+        }
+        merge_opts.allow_english_merge = !merge_no_english_merge;
+        return controller::run_merge(merge_inputs[0], merge_inputs[1], merge_out, merge_opts);
+    }
+    if (convert->parsed())
+        return controller::run_convert(convert_inputs, convert_lang, convert_out, convert_track);
     if (combine->parsed()) {
         if (combine_text && !combine_bilingual) {
             std::cerr << _("combine: --text requires --bilingual\n",

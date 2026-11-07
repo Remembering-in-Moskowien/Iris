@@ -29,12 +29,20 @@ struct CleanupReport {
 };
 
 /// 清理单句文本：
+/// - 去掉不可见控制字符（bidi 嵌入符、零宽空格、BOM）；
 /// - 去掉首尾空白、把连续空白压成一个空格；
 /// - 去掉汉字/中文标点两侧的 ASCII 空格；
 /// - 合并重复标点（"，。" → "。"，"。。" → "。"，"，，" → "，"）；
 /// - 半角 , ; : ! ? 转全角（中文语境）。
 /// 返回清理后的文本；report 可为 nullptr。
 std::string clean_text(const std::string& text, CleanupReport* report = nullptr);
+
+/// 去掉不可见控制字符：U+200B–U+200F、U+202A–U+202E、U+2060–U+2064、U+FEFF。
+/// 字幕从网页/其他工具搬来时经常夹带这些字符，进 ASS 会造成字距异常或渲染错位。
+std::string strip_control_chars(const std::string& text);
+
+/// 统计不可见控制字符个数（lint / 报告用）。
+int count_control_chars(const std::string& text);
 
 /// 就地校正一组句子（按时间顺序）：
 /// - 文本清理（clean_text）；

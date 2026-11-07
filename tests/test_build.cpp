@@ -217,3 +217,38 @@ TEST_CASE("default template has the production geometry") {
     REQUIRE(eng->margin_v == 100);
     REQUIRE(tpl.find_style("eng-Twilight")->margin_v == 880);
 }
+
+TEST_CASE("TADC style sheet loads from JSON") {
+    subtitle::AssScript script;
+    std::string error;
+    REQUIRE(view::load_ass_template("docs/themes/tadc.json", script, error));
+    CHECK(script.find_style("chi") != nullptr);
+    CHECK(script.find_style("eng-Pomni") != nullptr);
+    CHECK(script.find_style("chi-Kaufmo") != nullptr);
+}
+
+TEST_CASE("build auto-discovers TADC style sheet") {
+    model::IrDocument doc;
+    doc.config.language = "zh";
+    model::Track track;
+    track.type = "transcribe";
+    track.language = "zh";
+    model::Sentence sentence;
+    sentence.start_ms = 1000;
+    sentence.end_ms = 2000;
+    sentence.text = "你好";
+    sentence.style = "chi-Pomni";
+    track.sentences.push_back(sentence);
+    doc.state.tracks.push_back(track);
+
+    view::AssBuildOptions options;
+    view::AssBuildResult result;
+    std::string error;
+    REQUIRE(view::build_ass(doc, options, result, error));
+
+    subtitle::AssScript output;
+    REQUIRE(subtitle::parse_ass_script(result.text, output, error));
+    CHECK(output.find_style("chi-Pomni") != nullptr);
+    REQUIRE(output.events.size() == 1);
+    CHECK(output.events.front().style == "chi-Pomni");
+}

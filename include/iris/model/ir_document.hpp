@@ -13,11 +13,11 @@ namespace iris::model {
 
 // ---------------------------------------------------------------------------
 // IR 中间文件模型（*.iris.json）。
-// 字段契约从 C# 版 Centurion (*.centurion.json, schemaVersion "1.0") 迁移而来：
+// IR 字段契约（schemaVersion "1.0"）：
 //   schema_version + generator + provenance[] + config + state
 // ---------------------------------------------------------------------------
 
-/// 工具生成信息（对应 C# GeneratorInfo）。
+/// 工具生成信息。
 struct GeneratorInfo {
     std::string tool = "iris";
     std::string version;
@@ -68,6 +68,7 @@ struct Sentence {
     std::optional<std::string> style; ///< ASS 样式名（如 chi / eng-Twilight）
     std::optional<std::string> raw;   ///< 原始 ASS 文本（含 {\K..} 等覆盖标签）
     std::optional<std::string> translated_raw; ///< 译文行的 ASS 文本（含 \K）
+    std::optional<std::string> role;  ///< dialogue | sdh | lyric | interjection | annotation
     int layer = 0;                    ///< ASS 层
     bool comment = false;             ///< Comment 行
 
@@ -133,7 +134,7 @@ struct WorkflowState {
     static WorkflowState from_json(const nlohmann::json& j);
 };
 
-/// IR 文档根对象（对应 C# CenturionDocument）。
+/// IR 文档根对象。
 struct IrDocument {
     std::string schema_version = "1.0";
     GeneratorInfo generator;
@@ -147,7 +148,7 @@ struct IrDocument {
 
     [[nodiscard]] std::string dump(int indent = 2) const;
     static IrDocument load(const std::string& path);
-    void save(const std::string& path) const;
+    void save(const std::string& path, int indent = 2) const;
 };
 
 /// 文档校验结果。

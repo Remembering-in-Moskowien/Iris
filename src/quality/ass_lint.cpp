@@ -13,6 +13,7 @@
 
 #include "iris/infra/i18n.hpp"
 #include "iris/subtitle/parser.hpp"
+#include "iris/text/cleanup.hpp"
 
 namespace iris::quality {
 
@@ -435,6 +436,11 @@ LintFileResult lint_ass(const LintFile& file, const LintOptions& options,
         }
         timed.push_back({static_cast<int>(i), ev.start_ms, ev.end_ms, ev.has_karaoke});
 
+        if (text::count_control_chars(ev.text) > 0) {
+            add(ev.line_no, "control-char", "warning",
+                "含不可见控制字符（bidi 嵌入符/零宽空格），会造成字距异常或渲染错位");
+        }
+
         const auto it = styles.find(ev.style);
         if (it == styles.end()) {
             add(ev.line_no, "style-undefined", "error", "样式未定义：" + ev.style);
@@ -801,7 +807,8 @@ std::string lint_html(const LintReport& report, const LintOptions& options) {
             {"lyric-candidate", "疑似歌词段但未打轴"},
             {"song-styles-unused", "定义了角色样式却没有 \\K"},
             {"wrapstyle-typo", "WarpStyle 拼写错误"},
-            {"bad-time", "时间码无效"}};
+            {"bad-time", "时间码无效"},
+            {"control-char", "含不可见控制字符（bidi / 零宽空格）"}};
         for (const auto& [code, count] : report.code_counts) {
             auto it = meaning.find(code);
             os << "<tr><td class=\"mono\">" << escape_html(code) << "</td><td>" << count

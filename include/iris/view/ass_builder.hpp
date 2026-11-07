@@ -12,13 +12,16 @@ namespace iris::view {
 // IR → ASS 成品渲染（M1：模板 / 双语 / 整片偏移 / 4K 缩放）。
 //
 // 样式来源优先级：
-//   1. --template（.json 模板，或直接用 .ass 成品反推）
-//   2. IR 里的 styles（convert 过的成品能原样往返）
-//   3. 内置 1080p 模板（MLP 项目的 chi / eng / 角色样式）
+//   1. --style-sheet（JSON 样式表）
+//   2. --template（.json 模板，或直接用 .ass 成品反推）
+//   3. 自动发现的主题（当前为 TADC 角色样式）
+//   4. IR 里的 styles（convert 过的成品能原样往返）
+//   5. 内置 1080p 默认模板
 // ---------------------------------------------------------------------------
 
 struct AssBuildOptions {
-    std::string template_path;        ///< .json 或 .ass；空 = IR 样式 / 内置模板
+    std::string template_path;        ///< .json 或 .ass；空 = 自动样式 / 内置默认模板
+    std::string style_sheet_path;     ///< 样式表 JSON；优先于 template_path
     bool bilingual = false;           ///< 每个句子输出「译文 + 原文」两条同码事件
     std::int64_t shift_ms = 0;        ///< 额外整片偏移（叠加在 IR timelineOffsetMs 上）
     bool use_ir_offset = true;        ///< 是否叠加 IR 里的 timelineOffsetMs

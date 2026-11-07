@@ -16,8 +16,8 @@ struct VsfSegment {
     int roi_h = 0;
 };
 
-/// 自实现 VSF：ffmpeg rawvideo 流式抽帧 → 精准 ROI 裁剪（用户传参）→ 四信号融合单帧检测
-/// → 时间窗口时序聚合 → 段构建。不依赖 OpenCV、不自动校准 ROI。
+/// Iris VSF：ffmpeg rawvideo 流式抽帧 → ROI 裁剪 → iris_vsf DLL 单帧评分
+/// → 自适应阈值与时间滞回 → 段构建。不依赖 OpenCV、不自动校准 ROI。
 /// roi: 精准绝对坐标 (x, y, w, h)。sample_fps: 抽帧采样率。
 std::vector<VsfSegment> run_vsf(const std::string& video_path,
                                  int roi_x, int roi_y, int roi_w, int roi_h,

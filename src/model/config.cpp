@@ -175,13 +175,6 @@ std::string default_models_dir() {
     return (fs::path(data_root()) / "models").string();
 }
 
-std::string legacy_appdata_config() {
-    if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr && *appdata != '\0') {
-        return (fs::path(appdata) / "iris" / "config.json").string();
-    }
-    return {};
-}
-
 std::string resolve_config_path(const std::string& explicit_path) {
     if (!explicit_path.empty()) return explicit_path;
     if (const char* env = std::getenv("IRIS_CONFIG"); env != nullptr && *env != '\0') {
@@ -193,25 +186,6 @@ std::string resolve_config_path(const std::string& explicit_path) {
     // 仓库内旧配置（开发时的习惯位置）
     if (fs::exists("iris.config.json", ec)) return "iris.config.json";
 
-    // 旧版写在 %APPDATA% 的配置：迁移到数据根目录，避免继续把模型指向系统盘
-    const std::string legacy = legacy_appdata_config();
-    if (!legacy.empty() && fs::exists(legacy, ec)) {
-        const auto migrated = AppConfig::load_or_default(legacy);
-        AppConfig fresh = migrated;
-        const char* appdata_env = std::getenv("APPDATA");
-        const bool models_on_system_drive =
-            fresh.models_dir.empty() ||
-            (appdata_env != nullptr && fresh.models_dir.rfind(appdata_env, 0) == 0);
-        if (models_on_system_drive) fresh.models_dir = default_models_dir();
-        try {
-            fresh.save(root_config);
-            spdlog::info("config: 已从 {} 迁移到 {}（模型目录 {}）", legacy, root_config,
-                         fresh.models_dir);
-        } catch (...) {
-            return legacy; // 迁移失败就继续用旧文件
-        }
-        return root_config;
-    }
     return root_config;
 }
 

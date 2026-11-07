@@ -30,9 +30,10 @@ std::wstring build_command_line(const std::vector<std::string>& args) {
     for (const auto& a : args) {
         if (cmd.tellp() != std::streampos(0)) cmd << L' ';
         cmd << L'"';
-        for (char c : a) {
-            if (c == '"') cmd << L"\\\"";
-            else cmd << static_cast<wchar_t>(static_cast<unsigned char>(c));
+        const auto wide = to_wide(a);
+        for (wchar_t c : wide) {
+            if (c == L'"') cmd << L"\\\"";
+            else cmd << c;
         }
         cmd << L'"';
     }

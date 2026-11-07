@@ -8,6 +8,7 @@ add_executable(iris_tests
     test_lint.cpp
     test_build.cpp
     test_karaoke.cpp
+    test_merge.cpp
     test_rules.cpp
     test_align.cpp
     test_project.cpp

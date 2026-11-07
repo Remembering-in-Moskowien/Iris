@@ -11,6 +11,7 @@
 
 #include "iris/infra/i18n.hpp"
 #include "iris/infra/log.hpp"
+#include "iris/infra/paths.hpp"
 #include "iris/ui/console.hpp"
 #include <nlohmann/json.hpp>
 #include "iris/infra/pipe_reader.hpp"
@@ -40,6 +41,13 @@ bool probe_size(const std::string& video, int& width, int& height, std::string& 
         return false;
     }
     return true;
+}
+
+double probe_duration(const std::string& video) {
+    const auto r = infra::run_process({"ffprobe", "-v", "error", "-show_entries",
+                                       "format=duration", "-of", "csv=p=0", video});
+    if (!r.ok() || !r.value().success()) return 0.0;
+    return std::atof(r.value().stdout_text.c_str());
 }
 
 /// 在 t 秒处取一帧，裁出 ROI，返回 RGB24 像素。
@@ -90,7 +98,7 @@ std::string join_lines(const std::vector<ocr::OcrLine>& lines) {
 } // namespace
 
 int run_ocr(const OcrCommandOptions& opts) {
-    if (!fs::exists(opts.input)) {
+    if (!fs::exists(infra::utf8_path(opts.input))) {
         std::cerr << _("ocr: input not found: ", "ocr: 输入文件不存在：") << opts.input << '\n';
         return 1;
     }
@@ -141,10 +149,19 @@ int run_ocr(const OcrCommandOptions& opts) {
 
     // 1) 找字幕段（vsf）
     // 字幕条只占 ROI 的一小部分，vsf 的四信号分数会被稀释，所以单独给一个更低的阈值。
-    const auto segments = ops::run_vsf(opts.input, rx, ry, rw, rh, opts.sample_fps, 0.10);
-    if (segments.empty()) {
-        std::cerr << _("ocr: no subtitle segments detected\n", "ocr: 没有检测到字幕段\n");
-        return 1;
+    auto segments = ops::run_vsf(opts.input, rx, ry, rw, rh, opts.sample_fps, 0.10);
+    bool fallback_sampling = false;
+    if (segments.empty() || segments.size() < 20) {
+        const double duration = probe_duration(opts.input);
+        if (duration <= 0.0) {
+            std::cerr << _("ocr: no subtitle segments detected\n", "ocr: 没有检测到字幕段\n");
+            return 1;
+        }
+        // 白字黑边字幕在复杂动画背景上可能无法通过 VSF 的启发式检测；
+        // 此时按固定帧率采样，仍由 OCR 文本变化决定 cue 边界。
+        segments.push_back({0.0, duration, 0.0f, rx, ry, rw, rh});
+        fallback_sampling = true;
+        spdlog::warn("ocr: VSF 未检测到字幕段，启用全片固定帧率采样（{:.1f}s）", duration);
     }
 
     // 2) 逐段取帧 + OCR
@@ -181,7 +198,9 @@ int run_ocr(const OcrCommandOptions& opts) {
     for (std::size_t i = 0; i < segments.size(); ++i) {
         const auto& seg = segments[i];
         const double span = std::max(0.2, seg.end_sec - seg.start_sec);
-        const double step = std::clamp(span / 6.0, 0.3, 1.0);
+        const double step = fallback_sampling
+                                ? std::clamp(1.0 / std::max(0.1, opts.sample_fps), 0.3, 2.0)
+                                : std::clamp(span / 6.0, 0.3, 1.0);
         for (double t = seg.start_sec; t <= seg.end_sec + 1e-6; t += step) {
             std::vector<unsigned char> rgb;
             if (!grab_rgb(opts.input, t, rx, ry, rw, rh, rgb, error)) {

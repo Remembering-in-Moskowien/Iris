@@ -14,8 +14,10 @@ namespace iris::text {
 
 struct KaraokeApplyOptions {
     bool fill_even = false;
+    bool even_syllables = false; ///< 兜底均分时按音节加权（英文歌词没有词级时间时必用）
     bool overwrite = false;
     int tolerance_ms = 30;
+    std::string only_role; ///< 只处理该角色的句子（如 lyric）；空 = 全部
 };
 
 struct KaraokeApplyStats {

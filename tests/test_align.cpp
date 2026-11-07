@@ -50,6 +50,44 @@ TEST_CASE("dry-run counts sentences without touching words") {
     REQUIRE(track.sentences[0].words.empty());
 }
 
+TEST_CASE("sentence timing can be replaced from valid aligned words") {
+    model::Sentence sentence;
+    sentence.start_ms = 1000;
+    sentence.end_ms = 4000;
+    sentence.words = {
+        model::Word{.text = "zero", .start = 1.25, .end = 1.25},
+        model::Word{.text = "first", .start = 1.3, .end = 1.55},
+        model::Word{.text = "last", .start = 2.1, .end = 2.6},
+    };
+
+    REQUIRE(asr::apply_word_timings_to_sentence(sentence, 10000));
+    REQUIRE(sentence.start_ms == 1300);
+    REQUIRE(sentence.end_ms == 2600);
+}
+
+TEST_CASE("sentence timing stays unchanged when all aligned words have zero duration") {
+    model::Sentence sentence;
+    sentence.start_ms = 1000;
+    sentence.end_ms = 4000;
+    sentence.words = {model::Word{.text = "collapsed", .start = 1.25, .end = 1.25}};
+
+    REQUIRE_FALSE(asr::apply_word_timings_to_sentence(sentence, 10000));
+    REQUIRE(sentence.start_ms == 1000);
+    REQUIRE(sentence.end_ms == 4000);
+}
+
+TEST_CASE("sentence timing rejects implausibly compressed aligned words") {
+    model::Sentence sentence;
+    sentence.start_ms = 1000;
+    sentence.end_ms = 4000;
+    sentence.text = "This is a long subtitle line";
+    sentence.words = {model::Word{.text = sentence.text, .start = 1.25, .end = 1.35}};
+
+    REQUIRE_FALSE(asr::apply_word_timings_to_sentence(sentence, 10000));
+    REQUIRE(sentence.start_ms == 1000);
+    REQUIRE(sentence.end_ms == 4000);
+}
+
 TEST_CASE("alignment needs a model when not dry-running") {
     model::Track track;
     model::Sentence a;

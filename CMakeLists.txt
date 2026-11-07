@@ -15,6 +15,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(IRIS_BUILD_TESTS "Build the test suite" ON)
+option(IRIS_BUILD_VSF_DLL "Build and distribute the Iris VSF core DLL" ON)
+if(NOT IRIS_BUILD_VSF_DLL)
+  message(FATAL_ERROR "IRIS_BUILD_VSF_DLL=OFF is unsupported: iris_core requires the VSF ABI")
+endif()
 
 # 构建号：CI 注入 GitHub run number；release tag = v{run_number}，--version 同步显示。
 set(IRIS_BUILD_NUMBER "" CACHE STRING "Build number appended to version (CI run number)")
@@ -27,6 +31,17 @@ add_compile_definitions(IRIS_VERSION_STRING="${IRIS_VERSION_STRING}")
 message(STATUS "Iris: version ${IRIS_VERSION_STRING}")
 
 include(cmake/dependencies.cmake)
+
+if(IRIS_BUILD_VSF_DLL)
+  add_library(iris_vsf SHARED src/vsf/vsf_core.cpp)
+  target_include_directories(iris_vsf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  target_compile_definitions(iris_vsf PRIVATE IRIS_VSF_BUILD)
+  target_compile_options(iris_vsf PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
+  set_target_properties(iris_vsf PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+endif()
 
 # ---------------------------------------------------------------------------
 # MVC 分层（Model-View-Controller）：
@@ -81,6 +96,8 @@ add_library(iris_core
     src/subtitle/combine.cpp
     src/subtitle/ass_script.cpp
     src/subtitle/ir_bridge.cpp
+    src/subtitle/container.cpp
+    src/subtitle/reconcile.cpp
     src/asr/asr.cpp
     src/asr/align.cpp
     src/asr/ct2_mel.cpp
@@ -104,6 +121,7 @@ add_library(iris_core
     src/tts/qwen3_tts.cpp
     src/tts/indextts.cpp
     src/mt/translator.cpp
+    src/llm/scheduler.cpp
     src/emotion/emotion.cpp)
 target_include_directories(iris_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -118,6 +136,9 @@ target_compile_definitions(iris_core PUBLIC
 target_link_libraries(iris_core PUBLIC
     nlohmann_json::nlohmann_json
     spdlog::spdlog)
+if(IRIS_BUILD_VSF_DLL)
+    target_link_libraries(iris_core PUBLIC iris_vsf)
+endif()
 
 # ASR 推理后端：运行时以打包 DLL 引用（tools/runtimes，不内嵌源码）。
 if(IRIS_HAS_CRISPASR)
@@ -139,6 +160,7 @@ add_executable(iris
     src/controller/asr_command.cpp
     src/controller/build_command.cpp
     src/controller/validate_command.cpp
+    src/controller/compact_command.cpp
     src/controller/doctor_command.cpp
     src/controller/models_command.cpp
     src/controller/vsf_command.cpp
@@ -148,6 +170,8 @@ add_executable(iris
     src/controller/translate_command.cpp
     src/controller/correct_command.cpp
     src/controller/subtitle_command.cpp
+    src/controller/merge_command.cpp
+    src/controller/tracks_command.cpp
     src/controller/ocr_command.cpp
     src/controller/quality_command.cpp
     src/controller/lint_command.cpp
@@ -165,6 +189,24 @@ target_link_libraries(iris PRIVATE iris_core CLI11::CLI11)
 target_compile_options(iris PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 set_target_properties(iris PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+if(IRIS_BUILD_VSF_DLL)
+    add_dependencies(iris iris_vsf)
+endif()
+
+install(TARGETS iris
+    RUNTIME DESTINATION bin)
+install(DIRECTORY docs/themes/
+    DESTINATION bin/themes
+    FILES_MATCHING PATTERN "*.json")
+if(IRIS_BUILD_VSF_DLL)
+    install(TARGETS iris_vsf
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+    install(FILES include/iris/vsf/vsf_api.h
+        DESTINATION include/iris/vsf)
+endif()
+install(FILES LICENSE DESTINATION .)
 
 # ---------------------------------------------------------------------------
 # Tests
